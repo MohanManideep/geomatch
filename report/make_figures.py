@@ -21,7 +21,6 @@ from PIL import Image
 ROOT = Path(__file__).resolve().parents[1]
 OUT = Path("/var/tmp/luli38se-geomatch/outputs")
 TRAIN_IMAGES = Path("/var/tmp/luli38se-geomatch/data/geo_dataset/train")
-OFFICIAL_CSV = ROOT / "splits/official_folds_seed42.csv"
 FIG_DIR = Path(__file__).resolve().parent / "figures"
 FIG_DIR.mkdir(parents=True, exist_ok=True)
 
