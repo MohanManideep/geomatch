@@ -1,0 +1,21 @@
+{
+  "augmentation": {
+    "blur_probability": 0.05,
+    "brightness": 0.12,
+    "color_jitter_probability": 0.8,
+    "contrast": 0.12,
+    "grayscale_probability": 0.0,
+    "horizontal_flip_probability": 0.0,
+    "hue": 0.01,
+    "left_crop_end_fraction_range": [0.72, 0.78],
+    "random_erasing_probability": 0.0,
+    "right_crop_start_fraction_range": [0.22, 0.28],
+    "saturation": 0.1
+  },
+  "default_image_directory": "/var/tmp/luli38se-geomatch/data/geo_dataset/train",
+  "format": "geomatch-regnet-data-config",
+  "global_size": 512,
+  "local_size": 256,
+  "validation_left_crop_end_fraction": 0.75,
+  "validation_right_crop_start_fraction": 0.25
+}

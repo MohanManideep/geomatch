@@ -1,0 +1,118 @@
+{
+  "format": "geomatch-regnet-country-aware-retrieval-finetune",
+  "start_from": "ssl_backbone",
+  "batch": {
+    "effective_batch": 64,
+    "gradient_accumulation_steps": 2,
+    "physical_batch": 32,
+    "validation_batch": 64,
+    "workers": 4
+  },
+  "checkpoint": {
+    "fixed_final_epoch": 40,
+    "selection_policy": "fixed_epoch_without_validation_selection",
+    "pilot_advance_fold0_median_km": 999
+  },
+  "ema": {
+    "decay": 0.999
+  },
+  "evaluation": {
+    "local_rerank_weight": 0.8,
+    "shortlist_top_k": 200
+  },
+  "gradient_clip_norm": 5.0,
+  "objective": {
+    "classification": {
+      "label_smoothing": 0.03,
+      "terms": {
+        "a": 0.18333333333333332,
+        "b": 0.18333333333333332,
+        "c": 0.18333333333333332,
+        "coarse": 0.08,
+        "country": 0.25,
+        "fine": 0.12
+      }
+    },
+    "descriptor_preservation_weight": 0.0,
+    "joint_classification_weight": 0.2,
+    "spatial_retrieval": {
+      "embedding_temperature": 0.07,
+      "global_weight": 0.35,
+      "listwise_weight": 0.75,
+      "local_embedding_temperature": 0.07,
+      "local_hinge_weight": 0.25,
+      "local_listwise_weight": 0.75,
+      "local_margin": 0.15,
+      "local_verification_weight": 0.65,
+      "memory_queue_capacity": 4096,
+      "negative_minimum_km": 150.0,
+      "radius_km": 50.0,
+      "radius_target_weight": 0.55,
+      "soft_distance_clip_km": 1000.0,
+      "soft_distance_temperature_km": 50.0,
+      "teacher_target_temperature": 0.07,
+      "triplet_margin": 0.1,
+      "triplet_weight": 0.25
+    },
+    "spatial_retrieval_weight": 0.65
+  },
+  "optimizer": {
+    "backbone_learning_rate": 8e-05,
+    "backbone_weight_decay": 0.05,
+    "betas": [
+      0.9,
+      0.999
+    ],
+    "epsilon": 1e-08,
+    "head_learning_rate": 0.0006,
+    "head_weight_decay": 0.03,
+    "name": "AdamW"
+  },
+  "sampling": {
+    "geographic_positive_k": 8,
+    "geographic_positive_pool_k": 64,
+    "geographic_positive_maximum_km": 50.0,
+    "hard_descriptor_k": 256,
+    "hard_negative_same_country": true,
+    "hard_negative_minimum_km": 60.0,
+    "hard_negative_maximum_km": 700.0,
+    "hard_negative_cross_country_fallback_minimum_km": 200.0,
+    "failing_country_anchor_weight": {
+      "DE": 3.0,
+      "FR": 2.8,
+      "PL": 2.0,
+      "IT": 1.7,
+      "ES": 1.7,
+      "SE": 1.4,
+      "GB": 1.3
+    },
+    "queries_per_group": 3,
+    "refresh_hard_negatives_each_epoch": true,
+    "group_layout": [
+      "anchor",
+      "geographic_positive_1",
+      "geographic_positive_2",
+      "same_country_regional_hard_negative"
+    ]
+  },
+  "schedule": {
+    "minimum_learning_rate_factor": 0.06,
+    "name": "linear_warmup_cosine",
+    "warmup_epochs": 3
+  },
+  "seed": 940111,
+  "crossfit": {
+    "folds": [
+      0,
+      1,
+      2,
+      3,
+      4
+    ]
+  },
+  "target": {
+    "development_fold_advance_median_km": 73.0,
+    "project_complete_pooled_oof_median_km": 40.0
+  },
+  "ssl_backbone_path": "/var/tmp/luli38se-geomatch/outputs/regnet_cp_ssl_backbone_full/fold_{fold}/backbone.pt"
+}

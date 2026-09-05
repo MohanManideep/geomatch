@@ -1,0 +1,26 @@
+{
+  "color_mode": "RGB",
+  "fit_policy": "official fold != k training images only",
+  "fold": 2,
+  "format": "geomatch-regnet-cp-v2-normalization-v1",
+  "image_dimensions": [
+    512,
+    512
+  ],
+  "image_directory": "/var/tmp/luli38se-geomatch/data/geo_dataset/train",
+  "mean": [
+    0.4448547309333819,
+    0.49958780579450995,
+    0.5162960908158196
+  ],
+  "official_csv_sha256": "b96837109ef7afbba95b7ed661a1a9e250873b6018f6a1e85930396a31f2af47",
+  "pixel_count": 2465726464,
+  "std": [
+    0.25745193792671683,
+    0.2673741961043545,
+    0.3027634592055524
+  ],
+  "training_filename_sha256": "5a1d9e7ad731219e3e6f29847df51baf52bd152153dc1df359e16cc5a22cd57a",
+  "training_rows": 9406,
+  "validation_rows_excluded": 2352
+}
