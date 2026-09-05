@@ -61,6 +61,8 @@ Requires a CUDA GPU with bfloat16 support for training. Image data is expected a
 
 ## Run
 
+### Cross-validation (produces the reported 5-fold OOF numbers)
+
 ```bash
 # 1. SSL backbone, one per fold
 for f in 0 1 2 3 4; do
@@ -70,7 +72,24 @@ done
 # 2. retrieval fine-tune across all folds
 python src/country_aware_retrieval_finetune.py \
     --config configs/final_recipe.json --folds 0 1 2 3 4
+```
 
+### Submitted model (all 11,758 images, no held-out fold)
+
+```bash
+# retrain the recipe on every labelled image (resume-safe)
+python src/full_data_finetune.py --resume
+
+# generate predictions.csv for the public holdout set
+python src/predict_holdout.py
+```
+
+`full_data_finetune.py` initialises the trunk from one of the BYOL backbones
+above and finetunes for 40 epochs on all labelled data; `predict_holdout.py`
+runs the top-200 shortlist + late-interaction rerank and writes
+`predictions.csv` (`filename,pred_lat,pred_lng`, 2400 rows).
+
+```bash
 # regenerate report figures from saved predictions
 python report/make_figures.py
 ```
