@@ -57,8 +57,9 @@ decode time. None beat the plain blend:
 - **Geo-cell classification decode** (`42_geocell_decode.py`): the model's own
   fine-grained classification heads (240 cells) are *just as lost* on DE/FR as
   retrieval (argmax decode: DE 490 km / FR 523 km, vs retrieval's 534/551).
-  This is the strongest evidence that DE/FR location simply isn't encoded in
-  the representation -- not a decoding problem.
+  Two decoders that read the same descriptor fail equally, which is evidence
+  that the problem is upstream of the decoder. It does not establish *what* the
+  descriptor is missing -- we never tested that directly.
 
 ## 3. SSL pretraining + country-aware finetune (the real encoder win)
 
@@ -72,22 +73,41 @@ decode time. None beat the plain blend:
 - Result (single model, 22-epoch finetune): **57.7 km / 48.8% within 50**,
   down from the locked baseline's 89.16 -- the single biggest win of the project.
 
-## 4. Two more encoder retrains -- both failed
+**Which half did the work?** These two changes shipped together, so the -31 km
+is not attributable to BYOL alone. A fold-0 comparison separates them (epoch
+counts differ, so treat as indicative):
+
+| fold 0 | median |
+|---|---:|
+| locked baseline (no BYOL, no country-aware), ep 6 | 76.13 km |
+| + country-aware finetune from baseline weights, ep 12 | 69.96 km |
+| + country-aware from a *v2-joint* start, ep 24 | 71.86 km |
+| + BYOL init instead of baseline weights, ep 22 | **53.56 km** |
+
+Country-aware sampling alone buys ~6 km; swapping the initialisation to a BYOL
+trunk buys ~16 km more. BYOL is the larger term, but both contribute.
+
+## 4. Two more encoder retrains -- one backfired, one inconclusive
 
 - **Global-view augmentation.** The three-view transform fed the global
   descriptor an unaugmented 512px resize every epoch (only the local crops
   varied), a plausible memorisation source (confirmed by the reranker-gate
   finding above: a fold the encoder trained on reranks to 37 km, the identical
   fold held out reranks to 52 km). Added a random-resized-crop (scale 0.6-1.0)
-  on the global view only. **Made it worse** (63.7 vs 53.6 km on a matched
-  fold) -- the crop discards geographic context (horizon, skyline, scene
-  layout) the descriptor needs; same within-50 rate, much fatter error tail.
+  on the global view only. **Worse at every matched epoch on fold 0** (71.9 /
+  69.4 / 66.3 / 63.8 / 63.7 km at epochs 20/24/28/30/32, against the shipped
+  recipe's 60.2 / 58.3 / 61.5 / 63.4 / 58.1) -- consistent enough to call a
+  backfire; same within-50 rate, much fatter error tail.
 - **Finer local tokens.** Local matching used a 4x4 token grid per view;
   raised it to 8x8 (a free architecture change -- `local_projection` is
-  grid-size independent, so parameter count is unaffected), plus 48 epochs and
-  tighter hard-negative/positive bands. **Made it worse** (61.8 vs 53.6 km),
-  overfitting past epoch 36. Finer spatial resolution in the matcher did not
-  help distinguish Germany/France scenes.
+  grid-size independent, so parameter count is unaffected), plus 48 epochs.
+  **Inconclusive, not a failure**: at matched epochs on fold 0 it is within
+  noise of 4x4 (58.3 vs 60.7 at ep 40; 59.0 vs 61.1 at ep 36; 64.1 vs 60.2 at
+  ep 20). Only the extension to 48 epochs drifts up, to 61.8. The earlier
+  "it failed" verdict compared its ep-48 endpoint against a *different*
+  variant's ep-22 number. 4x4 was kept as the simpler option. Caveat: the
+  shipped recipe's own fold-0 median varies by 5.3 km across epochs 20-40, so
+  single-fold gaps of that size are not decisive either way.
 
 ## 5. Ensembling -- effective, but NOT part of the final submission
 
@@ -122,7 +142,7 @@ the SSL + country-aware-finetune recipe:
 | seed C | 55.84 km |
 | **seed D** | **55.60 km** |
 | seed E | 57.12 km |
-| seed F | 57.63 km |
+| seed F | 57.71 km |
 
 All cluster in the 55.6-59.2 km band -- i.e. this is the honest, reproducible
 performance envelope of one <=5M-parameter, from-scratch, SSL+retrieval model

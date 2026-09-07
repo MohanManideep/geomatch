@@ -227,7 +227,7 @@ def fig_oracle_gap() -> None:
         "recall": (~frame.recalled).mean() * 100,
     }
 
-    fig, ax = plt.subplots(figsize=(7.4, 4.0))
+    fig, ax = plt.subplots(figsize=(7.4, 3.2))
     x = np.arange(len(table))
     ax.bar(x, table.decoded, 0.72, color="#27ae60", label="located within 50 km")
     ax.bar(

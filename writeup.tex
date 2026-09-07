@@ -21,76 +21,69 @@
 
 \begin{figure*}[t]
 \centering
-\includegraphics[width=0.95\textwidth]{images/geomatch.png}
+\includegraphics[width=0.88\textwidth]{images/geomatch.png}
 \caption{One from-scratch RegNetY-400MF trunk, shared across a global view and
 two crops, feeds a global-descriptor retrieval branch and a local-token
-late-interaction reranker. The classification heads are a training regulariser
-and are not used at inference. $4{,}869{,}911$ parameters.}
+late-interaction reranker. Classification heads regularise training and are
+unused at inference. $4{,}869{,}911$ parameters.
+\emph{(The diagram's ``positives $\le$35\,km'' label is stale: the shipped
+config uses 50\,km, see \S\ref{sec:train}.)}}
 \label{fig:arch}
 \end{figure*}
 
-\section{Task}
+\section{Approach}
 
-Predict the GPS coordinate of a photo from twelve European countries, scored by
-median haversine error. The rules permit \emph{one} model of at most
-$5{,}000{,}000$ parameters, no pretrained weights, and no data beyond the
-$11{,}758$ labelled training images. Evaluation is on $2{,}400$ held-out photos.
+Predict a photo's GPS coordinate (12 European countries, $11{,}758$ labelled
+images, $2{,}400$ held out) with \emph{one} ${\le}5{,}000{,}000$-parameter
+model, no pretrained weights, no external data.
 
-\section{Why retrieval}
-
-The model predicts a location by matching the query against the training set and
-copying the coordinate of the best match. This does \emph{not} make the output
-continuous --- predictions are restricted to the $11{,}758$ training coordinates,
-which is a real quantisation. It is simply a cheap one: the geographically
-nearest training photo to a held-out photo is a median of \textbf{3.1\,km} away,
-and within 50\,km for \textbf{99.8\%} of queries. That ceiling is an order of
-magnitude below the error we actually achieve, so discretisation is not the
-binding constraint, whereas a geo-cell classifier is bounded by its cell size.
-
-The real argument for retrieval is that it removes the coordinate regression
-problem entirely: the encoder only has to learn \emph{which photos were taken
-near each other}, a metric-learning objective that a small from-scratch network
-can be supervised on densely, using every pair in a batch.
+We predict by \textbf{retrieval}: embed query and bank, copy the nearest
+match's coordinate. Retrieval is not continuous --- its output is restricted to
+the $11{,}758$ training coordinates --- but that discretisation is cheap: the
+geographically nearest training photo is a median $3.1$\,km away and within
+$50$\,km for $99.8\%$ of queries, far below the error we achieve, whereas a
+geo-cell classifier is bounded by its cell size. The gain is that the encoder
+never regresses a coordinate; it only learns which photos were taken near each
+other, which supervises densely from every pair in a batch.
 
 \section{Model (Fig.~\ref{fig:arch})}
 
-A single RegNetY-400MF trunk (\texttt{weights=None}) is shared across three
-views: the full frame at $512^2$ and aligned left/right crops at $256^2$, which
-preserve detail that a single downscaled frame destroys.
+One RegNetY-400MF trunk~\cite{regnet} (\texttt{weights=None}) is shared across
+three views: the full frame at $512^2$ and aligned left/right crops at $256^2$,
+which keep detail a single downscaled frame destroys.
 
-\textbf{Global branch.} Multi-scale GeM pooling over stages 2--4, fused across
-views, through an identity-initialised $384\!\times\!384$ layer, L2-normalised
-to a 384-D descriptor $g$.
+\textbf{Global branch.} Multi-scale GeM pooling~\cite{gem} over stages 2--4,
+fused across views, through an identity-initialised $384\!\times\!384$ layer,
+L2-normalised to a descriptor $g$.
+\textbf{Local branch.} Stage-4 features average-pooled to $4\!\times\!4$ per
+view (48 tokens), projected $440\!\to\!64$, L2-normalised to tokens $T$.
 
-\textbf{Local branch.} Stage-4 features average-pooled to $4\!\times\!4$ per view
-(48 tokens), projected $440\!\to\!64$, L2-normalised to tokens $T$.
-
-For query $q$ and bank image $b$, the shortlist is the cosine top-200 of
-$\langle g_q, g_b\rangle$, rescored by a symmetric MaxSim late interaction
+The shortlist is the cosine top-200 of $\langle g_q,g_b\rangle$, rescored by a
+symmetric MaxSim late interaction~\cite{colbert}:
 \[
 s(q,b)=0.2\,\langle g_q,g_b\rangle+0.8\cdot\tfrac12\!\left(
-\overline{\max_j}\,T_q T_b^{\!\top} + \overline{\max_i}\,T_q T_b^{\!\top}\right)
+\overline{\max_j}\,T_qT_b^{\!\top}+\overline{\max_i}\,T_qT_b^{\!\top}\right)
 \]
-where $\overline{\max_j}$ averages the per-token maxima over one axis. The
-top-1 candidate's coordinate is the prediction.
+The top-1 candidate's coordinate is the prediction.
 
-\section{Training}
+\section{Training}\label{sec:train}
 
-Two stages, evaluated on the official 5-fold split (train four folds, predict the
-fifth, fixed epoch count, no checkpoint selection).
+Evaluated on the official 5-fold split: train on four folds, predict the fifth,
+fixed epoch count, no checkpoint selection.
 
-\textbf{1. BYOL pretraining} of the trunk (negative-free, momentum target and
-predictor), labels unused, 160 epochs.
-
-\textbf{2. Country-aware retrieval fine-tuning}, 40 epochs, AdamW
-($8{\times}10^{-5}$ trunk, $6{\times}10^{-4}$ heads), batch 64, EMA 0.999. Each
-sampled group is an anchor, two geographic positives ($\le\!50$\,km, drawn by
-descriptor similarity from the 64 nearest), and one \emph{same-country} hard
-negative $60$--$700$\,km away, mined from the current EMA encoder and refreshed
-every epoch. Anchors from the weakest countries are oversampled (DE $3.0\times$,
-FR $2.8$, PL $2.0$, IT/ES $1.7$, SE $1.4$, GB $1.3$). The objective is $0.65\,$
-retrieval $+\,0.2\,$ classification regulariser; the retrieval term mixes global
-listwise/triplet ($0.35$) with local listwise/hinge ($0.65$).
+\textbf{(1) BYOL pretraining}~\cite{byol} of the trunk, labels unused, 160
+epochs. \textbf{(2) Country-aware retrieval fine-tuning}, 40 epochs, AdamW
+($8{\times}10^{-5}$ trunk, $6{\times}10^{-4}$ heads), physical batch 32 with 2
+gradient-accumulation steps (effective 64), EMA $0.999$. Each group is an
+anchor, two geographic positives and one \emph{same-country} hard negative
+$60$--$700$\,km away, re-mined from the current EMA encoder every epoch.
+Positives are the 8 most descriptor-similar of the 64 geographically nearest
+that lie within 50\,km; for the $10.7\%$ of anchors with fewer than 8 such
+neighbours the sampler falls back to the 8 nearest \emph{regardless of
+distance}, so ``$\le$50\,km'' holds for $\approx89\%$ of anchors, not all.
+Anchors from the weakest countries are oversampled (DE $3.0\times$, FR $2.8$,
+PL $2.0$, IT/ES $1.7$, SE $1.4$, GB $1.3$). Objective: $0.65$ retrieval $+\,0.2$
+classification regulariser.
 
 \section{Results}
 
@@ -99,7 +92,7 @@ listwise/triplet ($0.35$) with local listwise/hinge ($0.65$).
 \setlength{\tabcolsep}{4pt}
 \begin{tabular}{lccc}
 \toprule
-pooled 5-fold OOF & $n$ & median (km) & $\le$50\,km \\
+pooled 5-fold OOF & runs & median (km) & $\le$50\,km \\
 \midrule
 From-scratch retrieval baseline   & 1 & 89.2 & 45.3\% \\
 \;+ BYOL + country-aware, 22 ep   & 1 & 57.7 & 48.8\% \\
@@ -109,26 +102,33 @@ From-scratch retrieval baseline   & 1 & 89.2 & 45.3\% \\
 \emph{(non-compliant)} 6-model ensemble & 1 & 49.7 & 50.1\% \\
 \bottomrule
 \end{tabular}
-\caption{$n$ is the number of independently seeded 5-fold runs. The shipped
-recipe's three seeds gave 55.60 / 57.12 / 57.71\,km; we report their mean.
-\textbf{Best observed is 55.60\,km}, but that seed was not selected for
-submission --- the submitted model uses the config's default seed, which was
-never evaluated. Ensembles are listed only to document that the gain is real and
-was rejected: the rules require a single ${\le}5$M-parameter model.}
+\caption{Shipped-recipe row is mean\,$\pm$\,sample s.d.\ of three
+independently seeded 5-fold runs (55.60 / 57.12 / 57.71\,km; the $\le$50\,km
+column is likewise the 3-run mean). \textbf{Best observed is 55.60\,km}; the
+submitted model uses the configuration's default seed, which was not among the
+three, so no seed was chosen on evaluation results. Ensembles are listed to
+record that the gain is real and was rejected --- the rules require a single
+${\le}5$M model.}
 \label{tab:main}
 \end{table}
 
-Self-supervised pretraining is the one large win ($-31$\,km). Extending 22 to 40
-epochs is within seed noise ($\pm1.1$\,km across three seeds), so we do not claim
-it as an improvement; 40 epochs was kept because the schedule was fixed in
+\textbf{Which half did the work?} The $-31$\,km row changes two things at once,
+so we separate them on fold 0: baseline (no BYOL, no country-aware, ep 6)
+$76.1$\,km; country-aware fine-tuning alone $70.0$\,km from baseline weights
+(ep 12) and $71.9$ from a joint start (ep 24); adding the BYOL initialisation
+$\mathbf{53.6}$ (ep 22). Country-aware sampling buys ${\sim}6$\,km, the BYOL
+trunk ${\sim}16$\,km more --- both contribute, BYOL more. Single fold and
+unequal epoch counts, so indicative rather than decisive.
+
+Extending 22 to 40 epochs is within the $\pm1.1$\,km seed spread, so we do not
+claim it as an improvement; 40 was kept because the schedule was fixed in
 advance.
 
 \section{Where the error comes from}
 
-Splitting every query into \emph{located} ($\le$50\,km), \emph{mis-ranked}
-(a $\le$50\,km bank image was in the top-200 but not returned first) and
-\emph{never retrieved} (no $\le$50\,km image in the top-200) separates the two
-failure modes (Fig.~\ref{fig:decomp}).
+Splitting each query into \emph{located} ($\le$50\,km), \emph{mis-ranked} (a
+$\le$50\,km bank image was in the top-200 but not returned first) and
+\emph{never retrieved} separates the two failure modes.
 
 \begin{table}[h]
 \centering\footnotesize
@@ -143,22 +143,27 @@ France  & 25.2\% & 32.7\% & 42.1\% \\
 Germany & 14.2\% & 40.6\% & 45.2\% \\
 \bottomrule
 \end{tabular}
-\caption{Ranking is the larger loss pooled, but for Germany and France the
-descriptor fails to retrieve any nearby image at all for ${\sim}45\%$ of
-queries. Both stages fail there; a better reranker alone could not fix it.}
+\caption{Computed on one seed (55.60\,km run), so the pooled ``located''
+figure is $49.1\%$ rather than the 3-run mean of $48.8\%$ in
+Table~\ref{tab:main}. Ranking is the larger loss pooled, but in Germany and
+France ${\sim}45\%$ of queries retrieve nothing nearby at all: both stages
+fail, and a better reranker alone could not have closed it.}
 \label{tab:decomp}
 \end{table}
 
 \begin{figure}[h]
 \centering
 \includegraphics[width=\linewidth]{images/figures/oracle_gap.png}
-\caption{Error decomposition per country, sorted by success rate.}
+\caption{Error decomposition per country (same single seed as
+Table~\ref{tab:decomp}), sorted by success rate.}
 \label{fig:decomp}
 \end{figure}
 
-This is why we stopped working on decoding. Germany and France carry the whole
-remaining gap (median 505 and 570\,km against ${<}220$\,km everywhere else), and
-roughly half of their failures are already lost before any reranking happens.
+Germany and France dominate what is left. They are $17\%$ of the evaluation
+set; excluding them the pooled median falls from $55.6$ to $\mathbf{31.7}$\,km,
+and merely bringing them to Poland's level (the next worst) would give
+$41.8$\,km. They do not account for \emph{all} of the gap, but no other single
+factor comes close.
 
 \section{What did not work}
 
@@ -166,41 +171,52 @@ roughly half of their failures are already lost before any reranking happens.
 candidate reranker was tried four times (linear, residual, pairwise, and one
 gated on a held-out inner fold) and degraded the crossfit every time; the
 inner-fold gate passed only because the probe fold was held out from the
-reranker but not from the \emph{encoder}. Kernel-density / spatial-consensus
-decoding reached 72\,km against 57.7. Restricting the shortlist by predicted
-country cost 4\,km pooled (country accuracy is only 68\%, and a wrong gate is
-unrecoverable). Decoding from the auxiliary geo-cell head instead of retrieval
-gave DE 490 / FR 523\,km against retrieval's 534 / 551 --- equally lost, which is
-the strongest evidence that DE/FR location is simply not encoded.
+reranker but not from the \emph{encoder}. Kernel-density consensus decoding
+gave 72\,km against 57.7. Gating the shortlist on predicted country cost 4\,km
+pooled (country accuracy is 68\%, and a wrong gate is unrecoverable). Decoding
+from the auxiliary geo-cell head instead of retrieval gave DE 490 / FR 523\,km
+against retrieval's 534 / 551: two decoders reading the same descriptor fail
+equally, which locates the problem upstream of the decoder --- though it does
+not establish what the descriptor is missing.
 
-\textbf{Encoder variants (single-fold evidence, weaker).} Adding a
-random-resized-crop to the global view was worse at every matched epoch on
-fold 0 (e.g.\ 63.7 vs 58.1\,km at epoch 32); it discards the horizon and scene
-layout the descriptor needs. Raising the local grid from $4\!\times\!4$ to
-$8\!\times\!8$ was \emph{not} clearly worse (58.3 vs 60.7\,km at epoch 40) --- it
-is within fold-0 noise, and we kept $4\!\times\!4$ as the simpler option rather
-than because the variant failed. Extending that run to 48 epochs drifted back to
-61.8\,km. We flag these as suggestive only: the shipped recipe's own fold-0
-median wanders between 58.1 and 63.4\,km over epochs 20--40, so single-fold
-differences under ${\sim}3$\,km carry no signal.
+\textbf{Encoder variants (fold 0 only --- weaker evidence).} Adding a
+random-resized-crop to the global view was worse at every matched epoch
+(63.7 vs 58.1\,km at epoch 32), consistent enough to call a backfire; it
+discards the horizon and scene layout. Raising the local grid from
+$4\!\times\!4$ to $8\!\times\!8$ was \emph{not} worse (58.3 vs 60.7\,km at
+epoch 40) --- we kept $4\!\times\!4$ as the simpler option, not because the
+variant failed; extending it to 48 epochs drifted to 61.8\,km. Interpret both
+cautiously: the shipped recipe's own fold-0 median varies by $5.3$\,km across
+epochs 20--40, so single-fold gaps of that size are not decisive.
 
 \section{Limitations}
 
-The dominant one is Germany and France, and the evidence above says it is a
-representation failure, not a decoding one: a ${\le}5$M-parameter from-scratch
-encoder at 512\,px does not resolve the fine, localised cues (signage, plates,
-micro-architecture) that separate suburban scenes repeating over hundreds of
-kilometres. Country-aware oversampling and same-country hard negatives target
-exactly this and moved every other weak country but not these two. Secondary:
-the failed-variant evidence is single-fold; and the figures here are regenerated
-from cached out-of-fold predictions that are not checked into the repository.
+Germany and France are the dominant failure and we did not solve them. The
+evidence locates the problem in the representation rather than the decoder, but
+we never ran the experiment that would say \emph{why} --- e.g.\ probing whether
+the descriptor carries any within-country position signal. Country-aware
+oversampling targeted exactly this and moved every other weak country but not
+these two. Also: the failed-variant evidence is single-fold and confounded by
+epoch count, and the figures are rebuilt from cached out-of-fold predictions
+that are not in the repository, so they cannot be regenerated from a clean
+clone.
 
 \section{Submission}
 
-The submitted model is the recipe above retrained once on all $11{,}758$ images
-with no held-out fold, initialised from a BYOL trunk, using the configuration's
-default seed. It has $4{,}869{,}911$ parameters, trains in $\approx$67\,min on one
-RTX 4000 Ada, and writes \texttt{predictions.csv} ($2{,}400$ rows) in
-$\approx$5\,min.
+The recipe retrained once on all $11{,}758$ images with no held-out fold, from
+an existing BYOL trunk, using the configuration's default seed:
+$4{,}869{,}911$ parameters, \textbf{67\,min of fine-tuning} on one RTX 4000 Ada
+(excluding BYOL pretraining, ${\approx}2$\,h\,40\,min, which was reused rather
+than re-run), plus ${\approx}5$\,min to write \texttt{predictions.csv}.
+
+{\footnotesize
+\renewcommand{\refname}{\vspace{-1.2em}}
+\begin{thebibliography}{9}
+\setlength{\itemsep}{0pt}\setlength{\parskip}{0pt}
+\bibitem{regnet} Radosavovic et al. Designing Network Design Spaces. CVPR 2020.
+\bibitem{gem} Radenovi\'c, Tolias, Chum. Fine-tuning CNN Image Retrieval with No Human Annotation. TPAMI 2019.
+\bibitem{colbert} Khattab, Zaharia. ColBERT: Late Interaction over BERT. SIGIR 2020.
+\bibitem{byol} Grill et al. Bootstrap Your Own Latent. NeurIPS 2020.
+\end{thebibliography}}
 
 \end{document}
