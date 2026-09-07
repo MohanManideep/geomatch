@@ -1,0 +1,152 @@
+\documentclass[9pt,a4paper,twocolumn]{article}
+\usepackage[margin=1.6cm]{geometry}
+\usepackage{graphicx}
+\usepackage{booktabs}
+\usepackage{amsmath}
+\usepackage[hidelinks]{hyperref}
+\usepackage{caption}
+\captionsetup{font=footnotesize,labelfont=bf}
+\setlength{\parskip}{2pt}
+\setlength{\parindent}{0pt}
+\setlength{\columnsep}{0.7cm}
+\pagestyle{empty}
+
+\title{\vspace{-2em}GeoMatch: photo geolocation as visual retrieval}
+\author{Mohan Manideep Danda}
+\date{}
+
+\begin{document}
+\maketitle
+\vspace{-2.5em}
+
+\begin{figure*}[t]
+\centering
+\includegraphics[width=0.93\textwidth]{images/geomatch.png}
+\caption{The full pipeline. One from-scratch RegNetY-400MF trunk, shared across a
+global view and two crops, feeds a global-descriptor retrieval branch and a
+local-token late-interaction reranker. Classification heads regularise training
+only. $4{,}869{,}911$ parameters.}
+\label{fig:arch}
+\end{figure*}
+
+\section{Problem}
+
+Predict the GPS coordinate of a photo from twelve European countries, scored by
+median haversine error. The rules allow \emph{one} model of at most
+$5{,}000{,}000$ parameters, no pretrained weights, and no data beyond the
+$11{,}758$ labelled training images.
+
+Regression and grid classification both quantise the answer, so the model treats
+geolocation as \textbf{retrieval}: embed the query and every training image into a
+common space, take the nearest training images, and read the coordinate of the
+best match. This yields a continuous prediction from a compact encoder.
+
+\section{Architecture (Fig.~\ref{fig:arch})}
+
+A single RegNetY-400MF trunk (\texttt{weights=None}) is shared across three views:
+the full frame at $512^2$ and aligned left/right crops at $256^2$, which retain
+high-resolution detail a single downscaled frame loses. Two branches read it:
+
+\textbf{Global.} Multi-scale GeM pooling over stages 2--4, fused across views,
+passed through an identity-initialised $384\!\times\!384$ layer and
+L2-normalised to a 384-D descriptor. Cosine similarity to the bank gives a
+top-200 shortlist.
+
+\textbf{Local.} Stage-4 features average-pooled to a $4\!\times\!4$ grid per view
+(48 tokens), projected $440\!\to\!64$, L2-normalised. A bidirectional MaxSim
+(ColBERT-style late interaction) reranks the shortlist.
+
+Final score $=0.2\,\text{global}+0.8\,\text{local}$; the top-1 candidate's
+coordinate is the prediction. Country and geo-cell heads on the fused descriptor
+act only as a training regulariser.
+
+\section{Training}
+
+Two stages, evaluated on the official 5-fold split (train four, predict the
+fifth, fixed epochs, no checkpoint selection).
+
+\textbf{1. Self-supervised pretraining.} BYOL (negative-free, momentum target and
+predictor), labels unused, 160 epochs. A trunk warm-started only by the
+classification signal never learns features that separate locations \emph{within}
+a large, visually uniform country; BYOL gives it a sharper starting
+representation.
+
+\textbf{2. Country-aware retrieval fine-tuning}, 40 epochs from the BYOL trunk.
+The loss combines spatial-listwise, local-listwise, triplet and
+local-verification terms. Each group is an anchor, two geographic positives
+($\le 35$ km) and one \emph{same-country} hard negative mined from the current
+EMA encoder and refreshed every epoch, forcing the encoder to separate nearby
+same-country scenes. Anchors from the weakest countries are oversampled.
+
+\section{Results}
+
+\begin{table}[h]
+\centering\footnotesize
+\begin{tabular}{lcc}
+\toprule
+& median (km) & $\le$50 km \\
+\midrule
+From-scratch retrieval baseline & 89.2 & 45.3\% \\
++ BYOL + country-aware finetune & \textbf{55.6} & \textbf{49.1\%} \\
+\bottomrule
+\end{tabular}
+\caption{Pooled 5-fold out-of-fold error. Three seeds span 55.6--57.7 km. The
+submitted model retrains this recipe on all $11{,}758$ images.}
+\end{table}
+
+Every country improves (Fig.~\ref{fig:country}): Iceland 2.9 km, Norway 9.1,
+Finland 15, with GB (63) and SE (57) near the 50 km line. Longer schedules and a
+finer $8\!\times\!8$ local grid both overfit and hurt; augmenting the global view
+discarded scene context and hurt.
+
+\begin{figure}[h]
+\centering
+\includegraphics[width=\linewidth]{images/figures/per_country_median.png}
+\caption{Median error by country. Every country improves except Germany and
+France.}
+\label{fig:country}
+\end{figure}
+
+\textbf{The gap is ranking, not recall} (Fig.~\ref{fig:oracle}). A within-50 km
+training image is in the top-200 for $\sim$80\% of queries, but the decoder
+returns a within-50 km match only 49\% of the time. The right answer is retrieved
+and then mis-ranked.
+
+\begin{figure}[h]
+\centering
+\includegraphics[width=0.92\linewidth]{images/figures/oracle_gap.png}
+\caption{Oracle (best of top-$K$ within 50 km) vs.\ the decoded top-1.}
+\label{fig:oracle}
+\end{figure}
+
+\section{Germany and France: unresolved}
+
+Every other country's median is under 220 km; Germany (505) and France (570) do
+not move. This is a representation gap, confirmed three ways: retrieval ranking,
+retrieval recall (DE/FR oracle@200 plateaus near 60\% vs.\ 80\% pooled), and the
+geo-cell head, which is equally lost there. Country-aware oversampling and
+same-country hard negatives target exactly this and barely helped.
+
+\begin{figure}[h]
+\centering
+\includegraphics[width=0.98\linewidth]{images/figures/error_map.png}
+\caption{Misses (lines) are concentrated in Germany/France (red), not spread.}
+\label{fig:map}
+\end{figure}
+
+German and French street scenes---suburban architecture, road furniture,
+vegetation---repeat across hundreds of kilometres, while Nordic and Icelandic
+scenes carry distinctive terrain. A $\le$5M-parameter from-scratch encoder at
+512 px lacks the capacity to read the fine localised cues (signage, plates,
+micro-architecture) that separate them. That is the clearest direction for a
+larger budget.
+
+\section{Submission}
+
+The submitted model retrains the recipe once on all $11{,}758$ labelled images
+(no held-out fold), from an existing BYOL trunk: $4{,}869{,}911$ parameters,
+$\approx$70 min on one RTX 4000 Ada, plus $\approx$5 min to write
+\texttt{predictions.csv} ($2{,}400$ rows) via the top-200 shortlist and
+late-interaction rerank.
+
+\end{document}
