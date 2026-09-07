@@ -16,7 +16,7 @@ fixed epoch count, no checkpoint selection on the eval fold) unless noted.
 - **Issue:** classification decoding is bounded by the cell resolution.
   Retrieval (next section) is also discrete -- it can only return one of the
   11,758 training coordinates -- but that is a much finer grid: the
-  geographically nearest training photo to a held-out photo is a median 3.1 km
+  geographically nearest training photo to a held-out photo is a median 3.29 km
   away and within 50 km for 99.8% of rows, so the discretisation is nowhere
   near binding. Retrieval reached lower error at a similar parameter budget,
   so this line was dropped.
@@ -88,9 +88,9 @@ fixed epoch count, no checkpoint selection on the eval fold) unless noted.
   DE/FR better than nearest-neighbour matching.
 - **Result:** DE 490 km / FR 523 km -- **barely better** than retrieval's
   534/551 km, i.e. still catastrophic.
-- **Issue:** this is the strongest evidence that DE/FR location is a
-  genuine representation gap, not a decoding-method problem -- neither
-  decoding strategy can find information the encoder didn't learn.
+- **Issue:** two decoders reading the same descriptor fail equally, which
+  locates the problem upstream of the decoder. It does not establish *what*
+  the descriptor is missing -- we never probed that directly.
 
 ### 9. BYOL self-supervised pretraining + country-aware retrieval finetune
 - **Experiment:** pretrain the backbone with BYOL (negative-free
@@ -99,10 +99,15 @@ fixed epoch count, no checkpoint selection on the eval fold) unless noted.
   architecture from that backbone with country-aware hard-negative mining
   (same-country, visually-similar negatives mined fresh every epoch) and
   anchor oversampling for the weakest countries (DE/FR/PL/IT/ES/SE/GB).
-- **Result:** **57.7 km / 48.8% within 50 km** -- the single biggest win of
-  the project (-31 km vs. the locked baseline).
-- **Issue:** DE/FR barely moved (still 500+ km); every other country improved
-  substantially.
+- **Result:** **57.95 km / 48.8% within 50 km** (measured from the per-fold
+  prediction CSVs; an earlier note in this repo said 57.7, which is not
+  reproducible from the saved predictions) -- the single biggest win of the
+  project, -31 km vs. the locked baseline.
+- **Issue:** two changes shipped together, so the -31 km is not attributable
+  to BYOL alone. Fold-0 separation: baseline 76.13 -> country-aware only 69.96
+  (from baseline weights, ep 12) / 71.86 (from a joint start, ep 24) -> with
+  BYOL init 53.56 (ep 22). Country-aware buys ~6 km, BYOL ~16 km more.
+  Also: DE/FR barely moved (still 500+ km); every other country improved.
 
 ### 10. Anti-memorisation augmentation on the global view
 - **Experiment:** the three-view transform fed the global descriptor an
@@ -111,8 +116,10 @@ fixed epoch count, no checkpoint selection on the eval fold) unless noted.
   experiment #4's finding: an encoder-seen fold reranks to 37 km, the same
   fold unseen reranks to 52 km), added a random-resized-crop (scale 0.6-1.0)
   on the global view only, plus more weight decay and a higher EMA decay.
-- **Result:** **worse** -- 63.7 km vs. 53.6 km on a matched fold, at the same
-  within-50 rate (fatter error tail, not a ranking change).
+- **Result:** **worse at every matched epoch on fold 0** -- 71.9 / 69.4 / 66.3
+  / 63.8 / 63.7 km at epochs 20/24/28/30/32 against the shipped recipe's
+  60.2 / 58.3 / 61.5 / 63.4 / 58.1, at the same within-50 rate (fatter error
+  tail, not a ranking change).
 - **Issue:** cropping the global view discards geographic context (horizon,
   skyline, overall scene layout) the descriptor actually needs; the fix for
   memorisation cost more than it saved.
@@ -171,7 +178,7 @@ fixed epoch count, no checkpoint selection on the eval fold) unless noted.
 |---|---:|---|---|
 | Geo-cell classification (abandoned architecture) | 75.16 km | 5-fold | why classification decoding was dropped |
 | **Locked baseline (retrieval + late-interaction)** | **89.16 km** | 5-fold | starting point; the error decomposition |
-| SSL + country-aware finetune, 22 ep | 57.66 km | 5-fold | the one large win (-31 km) |
+| SSL + country-aware finetune, 22 ep | 57.95 km | 5-fold | the one large win (-31 km) |
 | **Shipped recipe, 40 ep** | **56.8 ± 1.1 km** (3 seeds) | 5-fold ×3 | what's submitted; best seed 55.60 |
 | Crop-augmentation variant | worse at every matched epoch (63.7 vs 58.1 @32) | fold 0 only | a plausible fix that backfired |
 | Finer-token (8×8) variant | within noise (58.3 vs 60.7 @40) | fold 0 only | bought nothing; 48 ep drifts to 61.8 |

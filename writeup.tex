@@ -25,26 +25,27 @@
 \caption{One from-scratch RegNetY-400MF trunk, shared across a global view and
 two crops, feeds a global-descriptor retrieval branch and a local-token
 late-interaction reranker. Classification heads regularise training and are
-unused at inference. $4{,}869{,}911$ parameters.
-\emph{(The diagram's ``positives $\le$35\,km'' label is stale: the shipped
-config uses 50\,km, see \S\ref{sec:train}.)}}
+unused at inference. $4{,}869{,}911$ parameters.}
 \label{fig:arch}
 \end{figure*}
 
-\section{Approach}
-
-Predict a photo's GPS coordinate (12 European countries, $11{,}758$ labelled
-images, $2{,}400$ held out) with \emph{one} ${\le}5{,}000{,}000$-parameter
-model, no pretrained weights, no external data.
+\section{Why retrieval}
 
 We predict by \textbf{retrieval}: embed query and bank, copy the nearest
 match's coordinate. Retrieval is not continuous --- its output is restricted to
 the $11{,}758$ training coordinates --- but that discretisation is cheap: the
-geographically nearest training photo is a median $3.1$\,km away and within
+geographically nearest training photo is a median $3.29$\,km away and within
 $50$\,km for $99.8\%$ of queries, far below the error we achieve, whereas a
 geo-cell classifier is bounded by its cell size. The gain is that the encoder
 never regresses a coordinate; it only learns which photos were taken near each
 other, which supervises densely from every pair in a batch.
+
+We did build the geo-cell alternative first: the same trunk with six
+hierarchical classification heads, decoded by a combinatorial partition
+decoder. It reached $75.2$\,km and we dropped it for the retrieval line, which
+was \emph{worse} at that point ($89.2$\,km) but had the lower floor and, once
+self-supervised pretraining was added, overtook it decisively. Table~\ref{tab:main}
+keeps the non-monotonic ordering rather than hiding it.
 
 \section{Model (Fig.~\ref{fig:arch})}
 
@@ -89,26 +90,26 @@ classification regulariser.
 
 \begin{table}[h]
 \centering\footnotesize
-\setlength{\tabcolsep}{4pt}
-\begin{tabular}{lccc}
+\setlength{\tabcolsep}{3pt}
+\begin{tabular}{lccccc}
 \toprule
-pooled 5-fold OOF & runs & median (km) & $\le$50\,km \\
+pooled 5-fold OOF & runs & med. & mean & $<$200 & $<$750 \\
 \midrule
-From-scratch retrieval baseline   & 1 & 89.2 & 45.3\% \\
-\;+ BYOL + country-aware, 22 ep   & 1 & 57.7 & 48.8\% \\
-\;+ 40 epochs (shipped recipe)    & 3 & \textbf{56.8}\,$\pm$\,1.1 & 48.8\% \\
+Geo-cell classification (dropped) & 1 & 75.2 & --- & --- & --- \\
+From-scratch retrieval baseline   & 1 & 89.2 & 618 & 55.9\% & 69.4\% \\
+\;+ BYOL + country-aware, 22 ep   & 1 & 58.0 & 490 & 60.7\% & 76.2\% \\
+\;+ 40 epochs (shipped recipe)    & 3 & \textbf{56.8}$\pm$1.1 & 469 & 61.4\% & 77.1\% \\
 \midrule
-\emph{(non-compliant)} 3-model ensemble & 1 & 52.0 & 49.7\% \\
-\emph{(non-compliant)} 6-model ensemble & 1 & 49.7 & 50.1\% \\
+\emph{(non-compliant)} 3-model ens. & 1 & 52.0 & --- & --- & --- \\
+\emph{(non-compliant)} 6-model ens. & 1 & 49.7 & --- & --- & --- \\
 \bottomrule
 \end{tabular}
-\caption{Shipped-recipe row is mean\,$\pm$\,sample s.d.\ of three
-independently seeded 5-fold runs (55.60 / 57.12 / 57.71\,km; the $\le$50\,km
-column is likewise the 3-run mean). \textbf{Best observed is 55.60\,km}; the
-submitted model uses the configuration's default seed, which was not among the
-three, so no seed was chosen on evaluation results. Ensembles are listed to
-record that the gain is real and was rejected --- the rules require a single
-${\le}5$M model.}
+\caption{Median/mean in km. Shipped row is mean\,$\pm$\,sample s.d.\ of three
+seeds (55.60 / 57.12 / 57.71); \textbf{best observed 55.60}, but the submitted
+model uses the config's default seed, which was not among the three --- no seed
+was chosen on results. Geo-cell predecessor's mean and rate columns were not
+retained. Ensembles are recorded to show the gain was real and rejected: the
+rules require one ${\le}5$M model.}
 \label{tab:main}
 \end{table}
 
@@ -117,12 +118,9 @@ so we separate them on fold 0: baseline (no BYOL, no country-aware, ep 6)
 $76.1$\,km; country-aware fine-tuning alone $70.0$\,km from baseline weights
 (ep 12) and $71.9$ from a joint start (ep 24); adding the BYOL initialisation
 $\mathbf{53.6}$ (ep 22). Country-aware sampling buys ${\sim}6$\,km, the BYOL
-trunk ${\sim}16$\,km more --- both contribute, BYOL more. Single fold and
-unequal epoch counts, so indicative rather than decisive.
-
-Extending 22 to 40 epochs is within the $\pm1.1$\,km seed spread, so we do not
-claim it as an improvement; 40 was kept because the schedule was fixed in
-advance.
+trunk ${\sim}16$\,km more --- both contribute, BYOL more. Single fold, unequal
+epoch counts: indicative, not decisive. Extending 22 to 40 epochs is within the
+$\pm1.1$\,km seed spread, so we do not claim it as an improvement.
 
 \section{Where the error comes from}
 
@@ -132,38 +130,40 @@ $\le$50\,km bank image was in the top-200 but not returned first) and
 
 \begin{table}[h]
 \centering\footnotesize
-\setlength{\tabcolsep}{5pt}
-\begin{tabular}{lccc}
+\setlength{\tabcolsep}{4pt}
+\begin{tabular}{lcccc}
 \toprule
-& located & mis-ranked & never retrieved \\
+& located & mis-rank & not retr. & bank$<$1\,km \\
 \midrule
-Pooled  & 49.1\% & 30.3\% & 20.7\% \\
-Iceland & 82.9\% & 15.2\% & \phantom{0}1.9\% \\
-France  & 25.2\% & 32.7\% & 42.1\% \\
-Germany & 14.2\% & 40.6\% & 45.2\% \\
+Pooled  & 49.1\% & 30.3\% & 20.7\% & 30.1\% \\
+Iceland & 82.9\% & 15.2\% & \phantom{0}1.9\% & 57.6\% \\
+France  & 25.2\% & 32.7\% & 42.1\% & 14.5\% \\
+Germany & 14.2\% & 40.6\% & 45.2\% & \phantom{0}9.1\% \\
 \bottomrule
 \end{tabular}
-\caption{Computed on one seed (55.60\,km run), so the pooled ``located''
-figure is $49.1\%$ rather than the 3-run mean of $48.8\%$ in
-Table~\ref{tab:main}. Ranking is the larger loss pooled, but in Germany and
-France ${\sim}45\%$ of queries retrieve nothing nearby at all: both stages
-fail, and a better reranker alone could not have closed it.}
+\caption{One seed (the 55.60\,km run), so pooled ``located'' is $49.1\%$ rather
+than the 3-run mean $48.8\%$ of Table~\ref{tab:main}. Last column: share of
+queries with \emph{any} bank photo within 1\,km. Full 12-country version in the
+repository README.}
 \label{tab:decomp}
 \end{table}
 
-\begin{figure}[h]
-\centering
-\includegraphics[width=\linewidth]{images/figures/oracle_gap.png}
-\caption{Error decomposition per country (same single seed as
-Table~\ref{tab:decomp}), sorted by success rate.}
-\label{fig:decomp}
-\end{figure}
+Germany ($505$\,km median) and France ($570$\,km) dominate what remains. They
+are $17\%$ of the evaluation set; excluding them the pooled median falls from
+$55.6$ to $\mathbf{31.7}$\,km, and merely bringing them to Poland's level would
+give $41.8$\,km. Ranking is the larger loss pooled, but for these two nearly
+half of queries retrieve nothing nearby at all --- both stages fail, so a better
+reranker could not have closed it.
 
-Germany and France dominate what is left. They are $17\%$ of the evaluation
-set; excluding them the pooled median falls from $55.6$ to $\mathbf{31.7}$\,km,
-and merely bringing them to Poland's level (the next worst) would give
-$41.8$\,km. They do not account for \emph{all} of the gap, but no other single
-factor comes close.
+\textbf{Bank density reframes what retrieval is doing.} Ranking the twelve
+countries by how often a bank photo lies within 1\,km reproduces the
+performance ranking almost exactly (Spearman $-0.89$ against median error):
+Iceland $57.6\%$, Germany $9.1\%$. This does \emph{not} explain the failure ---
+the nearest German bank photo is still a median $8.8$\,km away, against a
+$505$\,km German median, so the encoder is lost, not starved. What it does say
+is that where the model looks strong it is often matching near-duplicates of
+the same place, and the countries where that crutch is absent are exactly the
+ones where the descriptor has to generalise and does not.
 
 \section{What did not work}
 
@@ -175,9 +175,9 @@ reranker but not from the \emph{encoder}. Kernel-density consensus decoding
 gave 72\,km against 57.7. Gating the shortlist on predicted country cost 4\,km
 pooled (country accuracy is 68\%, and a wrong gate is unrecoverable). Decoding
 from the auxiliary geo-cell head instead of retrieval gave DE 490 / FR 523\,km
-against retrieval's 534 / 551: two decoders reading the same descriptor fail
-equally, which locates the problem upstream of the decoder --- though it does
-not establish what the descriptor is missing.
+against that encoder's retrieval 534 / 551: two decoders reading one descriptor
+fail equally, which locates the problem upstream of the decoder --- though it
+does not establish what the descriptor is missing.
 
 \textbf{Encoder variants (fold 0 only --- weaker evidence).} Adding a
 random-resized-crop to the global view was worse at every matched epoch
@@ -194,20 +194,18 @@ epochs 20--40, so single-fold gaps of that size are not decisive.
 Germany and France are the dominant failure and we did not solve them. The
 evidence locates the problem in the representation rather than the decoder, but
 we never ran the experiment that would say \emph{why} --- e.g.\ probing whether
-the descriptor carries any within-country position signal. Country-aware
-oversampling targeted exactly this and moved every other weak country but not
-these two. Also: the failed-variant evidence is single-fold and confounded by
-epoch count, and the figures are rebuilt from cached out-of-fold predictions
-that are not in the repository, so they cannot be regenerated from a clean
-clone.
+the descriptor carries any within-country position signal. Also: the
+failed-variant evidence is single-fold and confounded by epoch count, and the
+figures are rebuilt from cached out-of-fold predictions that are not in the
+repository, so they cannot be regenerated from a clean clone.
 
 \section{Submission}
 
 The recipe retrained once on all $11{,}758$ images with no held-out fold, from
-an existing BYOL trunk, using the configuration's default seed:
-$4{,}869{,}911$ parameters, \textbf{67\,min of fine-tuning} on one RTX 4000 Ada
-(excluding BYOL pretraining, ${\approx}2$\,h\,40\,min, which was reused rather
-than re-run), plus ${\approx}5$\,min to write \texttt{predictions.csv}.
+an existing BYOL trunk, using the config's default seed: $4{,}869{,}911$
+parameters, \textbf{67\,min of fine-tuning} on one RTX 4000 Ada (excluding BYOL
+pretraining, ${\approx}2$\,h\,40\,min, reused rather than re-run), plus
+${\approx}5$\,min to write \texttt{predictions.csv}.
 
 {\footnotesize
 \renewcommand{\refname}{\vspace{-1.2em}}

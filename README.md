@@ -43,29 +43,59 @@ existing backbone, so end to end it is ≈ 70 min plus ≈ 5 min to write
 
 ## Results
 
-Pooled 5-fold out-of-fold median haversine error, over three independently
-seeded runs of the shipped recipe: **56.8 ± 1.1 km** (55.60 / 57.12 / 57.71;
-best observed 55.60). The submitted model retrains the same recipe on all
-11,758 images using the config's default seed, which was not among the three
+Pooled 5-fold out-of-fold error. The shipped-recipe row is the mean ± sample
+s.d. of three independently seeded runs (medians 55.60 / 57.12 / 57.71; **best
+observed 55.60**). The submitted model retrains the same recipe on all 11,758
+images using the config's default seed, which was **not** among the three
 evaluated — no seed was selected on evaluation results.
 
-Self-supervised pretraining plus the country-aware retrieval finetune cut the
-per-country error across the board versus a plain from-scratch retrieval
-baseline — except in Germany and France, which stay far behind every other
-country:
+| pooled 5-fold OOF | runs | median | mean | <200 km | <750 km |
+|---|---:|---:|---:|---:|---:|
+| Geo-cell classification (dropped) | 1 | 75.2 km | — | — | — |
+| From-scratch retrieval baseline | 1 | 89.2 km | 618 km | 55.9% | 69.4% |
+| + BYOL + country-aware, 22 ep | 1 | 58.0 km | 490 km | 60.7% | 76.2% |
+| **+ 40 epochs (shipped recipe)** | 3 | **56.8 ± 1.1 km** | 469 km | 61.4% | 77.1% |
+| *(non-compliant)* 3-model ensemble | 1 | 52.0 km | — | — | — |
+| *(non-compliant)* 6-model ensemble | 1 | 49.7 km | — | — | — |
+
+The geo-cell predecessor was *better* than the retrieval baseline (75.2 vs
+89.2 km) — retrieval started worse and overtook it only after self-supervised
+pretraining. The ordering is left non-monotonic rather than hidden.
 
 ![Median error by country](images/figures/per_country_median.png)
 
+### Where the error comes from
+
 Splitting every query into *located* (≤50 km), *retrieved but mis-ranked*, and
-*never retrieved into the top-200* separates the two failure modes. Pooled, the
-split is 49.1% / 30.3% / 20.7% — ranking is the larger single loss, but recall
-failure is not negligible. For Germany it is 14.2% / 40.6% / **45.2%**: nearly
-half of German queries never retrieve a nearby image at all, so both stages fail
-there and no reranker could have fixed it.
+*never retrieved into the top-200* separates the two failure modes. The last
+column is the share of queries with **any** bank photo within 1 km — a measure
+of how often retrieval can lean on a near-duplicate. Ranking countries by it
+reproduces the performance ordering almost exactly (Spearman −0.89 against
+median error). Single seed (the 55.60 km run).
+
+| | located | mis-ranked | never retrieved | bank <1 km | median |
+|---|---:|---:|---:|---:|---:|
+| **Pooled** | 49.1% | 30.3% | 20.7% | 30.1% | 55.6 km |
+| Iceland | 82.9% | 15.2% | 1.9% | 57.6% | 2.9 km |
+| Norway | 65.6% | 23.6% | 10.8% | 49.5% | 9.1 km |
+| Finland | 64.8% | 29.3% | 5.9% | 30.1% | 15.0 km |
+| Belarus | 62.6% | 29.1% | 8.3% | 40.2% | 26.1 km |
+| Turkey | 56.9% | 26.8% | 16.3% | 33.1% | 28.4 km |
+| Sweden | 48.5% | 34.6% | 17.0% | 22.8% | 57.2 km |
+| United Kingdom | 47.2% | 39.5% | 13.3% | 28.9% | 63.2 km |
+| Italy | 43.6% | 27.2% | 29.2% | 28.3% | 214.6 km |
+| Spain | 43.4% | 29.5% | 27.1% | 31.8% | 142.2 km |
+| Poland | 36.1% | 34.6% | 29.3% | 16.8% | 217.2 km |
+| **France** | 25.2% | 32.7% | **42.1%** | 14.5% | **570.4 km** |
+| **Germany** | 14.2% | 40.6% | **45.2%** | 9.1% | **504.8 km** |
+
+Ranking is the larger loss pooled, but for Germany and France nearly half of
+queries never retrieve a nearby image at all — both stages fail there, so no
+reranker could have closed it. Bank density does **not** explain the failure:
+the nearest German bank photo is still a median 8.8 km away against a 505 km
+German median, so the encoder is lost, not starved.
 
 ![Error decomposition by country](images/figures/oracle_gap.png)
-
-![Where the misses are](images/figures/error_map.png)
 
 ## Layout
 
