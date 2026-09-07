@@ -20,7 +20,7 @@ the coordinate of the best match.
 Decoding: cosine top-200 shortlist on the global descriptor, rerank by
 `0.2 * global + 0.8 * local`, take the top-1 candidate's coordinate.
 
-![Model pipeline](report/figures/architecture.png)
+![Model pipeline](images/geomatch.png)
 
 ## Training
 
@@ -52,15 +52,15 @@ per-country error across the board versus a plain from-scratch retrieval
 baseline — except in Germany and France, which stay far behind every other
 country:
 
-![Median error by country](report/figures/per_country_median.png)
+![Median error by country](images/figures/per_country_median.png)
 
 The bottleneck is ranking, not recall: a within-50 km training image is in the
 retrieval top-200 for ~80% of queries, but the decoder selects it only ~49% of
 the time, and the gap is worst for DE/FR.
 
-![Oracle vs decoded](report/figures/oracle_gap.png)
+![Oracle vs decoded](images/figures/oracle_gap.png)
 
-![Where the misses are](report/figures/error_map.png)
+![Where the misses are](images/figures/error_map.png)
 
 ## Layout
 
@@ -69,7 +69,7 @@ configs/            final_recipe.json (training recipe), data.json (view + augme
 src/                model, data pipeline, objectives, and the two training entry points
 splits/             official_folds_seed42.csv
 artifacts/          per-fold normalization stats and geo-cell assignments read by the pipeline
-report/             figure-generation script and the figures used in the write-up
+images/             figure-generation script and the figures used in the write-up
 EXPERIMENT_LOG.md   narrative record of what was tried and why
 EXPERIMENTS_TABLE.md the same history as a compact experiment/result/issue table
 ```
@@ -118,14 +118,14 @@ runs the top-200 shortlist + late-interaction rerank and writes
 
 ```bash
 # regenerate report figures from saved predictions
-python report/make_figures.py
+python images/make_figures.py
 ```
 
 ## Formatting
 
 ```bash
 pip install black isort
-isort src report && black src report
+isort src images && black src images
 ```
 
 Configuration is in `pyproject.toml` (black + isort, 88-column).

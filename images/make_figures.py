@@ -2,7 +2,9 @@
 No training or GPU inference needed except the oracle-gap sweep (cheap: a
 cosine top-k over cached descriptors).
 
-Run: /var/tmp/luli38se-geomatch/venv/bin/python report/make_figures.py
+Run: /var/tmp/luli38se-geomatch/venv/bin/python images/make_figures.py
+
+The architecture diagram (images/geomatch.png) is drawn by hand, not here.
 """
 
 from __future__ import annotations
@@ -233,55 +235,6 @@ def fig_oracle_gap() -> None:
 
 
 # ---------------------------------------------------------------- Figure D
-def fig_architecture() -> None:
-    fig, ax = plt.subplots(figsize=(9, 3.6))
-    ax.axis("off")
-    labels = [
-        "512x512\nphoto",
-        "3 views:\nglobal + left\n+ right crop",
-        "shared\nRegNetY-400MF\n(from scratch)",
-        "GeM pool ->\n384-D descriptor\n+ 48 local tokens",
-        "cosine top-200\nshortlist",
-        "late-interaction\nrerank -> top-1\ncoordinate",
-    ]
-    n = len(labels)
-    w, gap = 0.13, 0.035
-    xs = [0.02 + i * (w + gap) for i in range(n)]
-    y, h = 0.5, 0.5
-    for x, label in zip(xs, labels):
-        ax.add_patch(
-            plt.Rectangle(
-                (x, y - h / 2),
-                w,
-                h,
-                fill=True,
-                facecolor="#eaf2f8",
-                edgecolor="#2471a3",
-                lw=1.3,
-            )
-        )
-        ax.text(x + w / 2, y, label, ha="center", va="center", fontsize=8.3)
-    for i in range(n - 1):
-        x0 = xs[i] + w
-        x1 = xs[i + 1]
-        ax.annotate(
-            "",
-            xy=(x1, y),
-            xytext=(x0, y),
-            arrowprops=dict(arrowstyle="->", color="#555", lw=1.2),
-        )
-    ax.set_xlim(0, xs[-1] + w + 0.02)
-    ax.set_ylim(0, 1)
-    ax.set_title(
-        "GeoCPRegNetRetrieval -- 4,869,911 parameters, no pretrained weights",
-        fontsize=10,
-    )
-    fig.tight_layout()
-    fig.savefig(FIG_DIR / "architecture.png", dpi=180)
-    plt.close(fig)
-    print("wrote architecture.png")
-
-
 # ---------------------------------------------------------------- Figure E
 def load_curve(path: Path):
     xs, ys = [], []
@@ -385,7 +338,6 @@ def main() -> int:
     fig_per_country(baseline, final)
     fig_error_map(final)
     fig_oracle_gap()
-    fig_architecture()
     fig_training_curves()
     fig_examples(final)
     print(f"\nall figures in {FIG_DIR}")
