@@ -313,7 +313,7 @@ def main() -> int:
                 "model": ema.model.state_dict(),
                 "config": config,
                 "start_provenance": start_provenance,
-                "parameters": int(count_trainable_parameters(ema.model)),
+                "parameters": int(count_trainable_parameters(model)),
                 "images": 11_758,
             },
         )
