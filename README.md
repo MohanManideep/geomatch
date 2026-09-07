@@ -32,9 +32,15 @@ one, fixed epoch count, no checkpoint selection):
 2. **Country-aware retrieval fine-tuning**
    (`src/country_aware_retrieval_finetune.py`, config `configs/final_recipe.json`)
    — spatial listwise + local listwise + triplet + local-verification losses,
-   geographic positives within 50 km, same-country hard negatives (60–700 km) re-mined each
+   geographic positives within 50 km (see note below), same-country hard negatives (60–700 km) re-mined each
    epoch, anchor oversampling for the weakest countries (DE, FR, PL, IT, ES, SE,
    GB), EMA teacher, 40 epochs.
+
+Positive sampling detail: positives are the 8 most descriptor-similar of the
+64 geographically nearest that lie within 50 km. For the 10.7% of anchors with
+fewer than 8 such neighbours the sampler falls back to the 8 most
+descriptor-similar of those same 64 **without the 50 km filter**, so the 50 km
+bound holds for ~89% of anchors, not all.
 
 Training time (single RTX 4000 Ada, 20 GB): BYOL backbone ≈ 2 h 40 m per fold;
 retrieval finetune ≈ 70 min (40 epochs). The submitted all-data model reuses an
@@ -69,9 +75,10 @@ pretraining. The ordering is left non-monotonic rather than hidden.
 Splitting every query into *located* (≤50 km), *retrieved but mis-ranked*, and
 *never retrieved into the top-200* separates the two failure modes. The last
 column is the share of queries with **any** bank photo within 1 km — a measure
-of how often retrieval can lean on a near-duplicate. Ranking countries by it
-reproduces the performance ordering almost exactly (Spearman −0.89 against
-median error). Single seed (the 55.60 km run).
+of the bank's local geographic coverage. Ranking countries by it reproduces the
+performance ordering almost exactly (Spearman −0.89 against median error); that
+is an association, not a demonstrated cause, and photos within 1 km need not be
+views of the same scene. Single seed (the 55.60 km run).
 
 | | located | mis-ranked | never retrieved | bank <1 km | median |
 |---|---:|---:|---:|---:|---:|
@@ -91,9 +98,9 @@ median error). Single seed (the 55.60 km run).
 
 Ranking is the larger loss pooled, but for Germany and France nearly half of
 queries never retrieve a nearby image at all — both stages fail there, so no
-reranker could have closed it. Bank density does **not** explain the failure:
-the nearest German bank photo is still a median 8.8 km away against a 505 km
-German median, so the encoder is lost, not starved.
+reranker could have closed it. Coverage does **not** explain the failure
+either: the nearest German bank photo is a median 8.8 km away against a 505 km
+German median, so the shortfall is not that no usable neighbour exists.
 
 ![Error decomposition by country](images/figures/oracle_gap.png)
 

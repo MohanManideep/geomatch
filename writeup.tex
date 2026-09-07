@@ -21,11 +21,11 @@
 
 \begin{figure*}[t]
 \centering
-\includegraphics[width=0.88\textwidth]{images/geomatch.png}
+\includegraphics[width=0.84\textwidth]{images/geomatch.png}
 \caption{One from-scratch RegNetY-400MF trunk, shared across a global view and
 two crops, feeds a global-descriptor retrieval branch and a local-token
-late-interaction reranker. Classification heads regularise training and are
-unused at inference. $4{,}869{,}911$ parameters.}
+late-interaction reranker. Classification heads regularise training only.
+$4{,}869{,}911$ parameters.}
 \label{fig:arch}
 \end{figure*}
 
@@ -40,12 +40,12 @@ geo-cell classifier is bounded by its cell size. The gain is that the encoder
 never regresses a coordinate; it only learns which photos were taken near each
 other, which supervises densely from every pair in a batch.
 
-We did build the geo-cell alternative first: the same trunk with six
-hierarchical classification heads, decoded by a combinatorial partition
-decoder. It reached $75.2$\,km and we dropped it for the retrieval line, which
-was \emph{worse} at that point ($89.2$\,km) but had the lower floor and, once
-self-supervised pretraining was added, overtook it decisively. Table~\ref{tab:main}
-keeps the non-monotonic ordering rather than hiding it.
+We built the geo-cell alternative first --- the same trunk with six
+hierarchical classification heads and a combinatorial partition decoder. It
+reached $75.2$\,km; we dropped it for the retrieval line, which was
+\emph{worse} then ($89.2$\,km) but had the lower floor and overtook it once
+self-supervised pretraining was added. Table~\ref{tab:main} keeps that
+non-monotonic ordering rather than hiding it.
 
 \section{Model (Fig.~\ref{fig:arch})}
 
@@ -80,8 +80,9 @@ anchor, two geographic positives and one \emph{same-country} hard negative
 $60$--$700$\,km away, re-mined from the current EMA encoder every epoch.
 Positives are the 8 most descriptor-similar of the 64 geographically nearest
 that lie within 50\,km; for the $10.7\%$ of anchors with fewer than 8 such
-neighbours the sampler falls back to the 8 nearest \emph{regardless of
-distance}, so ``$\le$50\,km'' holds for $\approx89\%$ of anchors, not all.
+neighbours the sampler falls back to the 8 most descriptor-similar of those
+same 64, \emph{without the 50\,km filter}, so ``$\le$50\,km'' holds for
+$\approx89\%$ of anchors, not all.
 Anchors from the weakest countries are oversampled (DE $3.0\times$, FR $2.8$,
 PL $2.0$, IT/ES $1.7$, SE $1.4$, GB $1.3$). Objective: $0.65$ retrieval $+\,0.2$
 classification regulariser.
@@ -104,23 +105,24 @@ From-scratch retrieval baseline   & 1 & 89.2 & 618 & 55.9\% & 69.4\% \\
 \emph{(non-compliant)} 6-model ens. & 1 & 49.7 & --- & --- & --- \\
 \bottomrule
 \end{tabular}
-\caption{Median/mean in km. Shipped row is mean\,$\pm$\,sample s.d.\ of three
-seeds (55.60 / 57.12 / 57.71); \textbf{best observed 55.60}, but the submitted
-model uses the config's default seed, which was not among the three --- no seed
-was chosen on results. Geo-cell predecessor's mean and rate columns were not
-retained. Ensembles are recorded to show the gain was real and rejected: the
-rules require one ${\le}5$M model.}
+\caption{Median/mean in km. Shipped row is mean\,$\pm$\,s.d.\ of three seeds
+(55.60 / 57.12 / 57.71); \textbf{best observed 55.60}, but the submitted model
+uses the config's default seed, not among the three --- no seed was chosen on
+results. Geo-cell mean/rate columns were not retained. Ensembles are recorded
+as a real gain rejected on the one-model rule.}
 \label{tab:main}
 \end{table}
 
-\textbf{Which half did the work?} The $-31$\,km row changes two things at once,
-so we separate them on fold 0: baseline (no BYOL, no country-aware, ep 6)
-$76.1$\,km; country-aware fine-tuning alone $70.0$\,km from baseline weights
-(ep 12) and $71.9$ from a joint start (ep 24); adding the BYOL initialisation
-$\mathbf{53.6}$ (ep 22). Country-aware sampling buys ${\sim}6$\,km, the BYOL
-trunk ${\sim}16$\,km more --- both contribute, BYOL more. Single fold, unequal
-epoch counts: indicative, not decisive. Extending 22 to 40 epochs is within the
-$\pm1.1$\,km seed spread, so we do not claim it as an improvement.
+\textbf{Which half did the work?} The $-31$\,km row changes two things at once
+and we cannot cleanly separate them: the available fold-0 runs differ in epoch
+count as well as in condition, so the differences below confound the two. What
+we observed on fold 0: baseline (no BYOL, no country-aware, ep 6) $76.1$\,km;
+country-aware fine-tuning without BYOL $70.0$\,km from baseline weights (ep 12)
+and $71.9$ from a joint start (ep 24); with the BYOL trunk $\mathbf{53.6}$
+(ep 22). The runs that include BYOL are the lowest by a wide margin, but no
+run isolates either change at a matched schedule, so we do not assign a
+per-component figure. Extending 22 to 40 epochs is within the $\pm1.1$\,km seed
+spread, so we do not claim it as an improvement.
 
 \section{Where the error comes from}
 
@@ -141,29 +143,26 @@ France  & 25.2\% & 32.7\% & 42.1\% & 14.5\% \\
 Germany & 14.2\% & 40.6\% & 45.2\% & \phantom{0}9.1\% \\
 \bottomrule
 \end{tabular}
-\caption{One seed (the 55.60\,km run), so pooled ``located'' is $49.1\%$ rather
-than the 3-run mean $48.8\%$ of Table~\ref{tab:main}. Last column: share of
-queries with \emph{any} bank photo within 1\,km. Full 12-country version in the
-repository README.}
+\caption{Computed on a single seed (the 55.60\,km run), not averaged over the
+three of Table~\ref{tab:main}. Last column: share of queries with \emph{any}
+bank photo within 1\,km. Full 12-country version in the repository README.}
 \label{tab:decomp}
 \end{table}
 
 Germany ($505$\,km median) and France ($570$\,km) dominate what remains. They
-are $17\%$ of the evaluation set; excluding them the pooled median falls from
-$55.6$ to $\mathbf{31.7}$\,km, and merely bringing them to Poland's level would
-give $41.8$\,km. Ranking is the larger loss pooled, but for these two nearly
-half of queries retrieve nothing nearby at all --- both stages fail, so a better
-reranker could not have closed it.
+are $17\%$ of the evaluation set, and the pooled median over the other ten
+countries alone is $\mathbf{31.7}$\,km. Ranking is the larger loss pooled, but
+for these two nearly half of queries retrieve nothing nearby at all --- both
+stages fail, so a better reranker could not have closed it.
 
-\textbf{Bank density reframes what retrieval is doing.} Ranking the twelve
-countries by how often a bank photo lies within 1\,km reproduces the
-performance ranking almost exactly (Spearman $-0.89$ against median error):
-Iceland $57.6\%$, Germany $9.1\%$. This does \emph{not} explain the failure ---
-the nearest German bank photo is still a median $8.8$\,km away, against a
-$505$\,km German median, so the encoder is lost, not starved. What it does say
-is that where the model looks strong it is often matching near-duplicates of
-the same place, and the countries where that crutch is absent are exactly the
-ones where the descriptor has to generalise and does not.
+\textbf{Bank coverage tracks performance.} Ranking the twelve countries by how
+often a bank photo lies within 1\,km reproduces the performance ordering almost
+exactly (Spearman $-0.89$ against median error): Iceland $57.6\%$, Germany
+$9.1\%$. This is an association between the bank's geographic coverage and
+accuracy; we did not test what drives it, and photos within 1\,km need not be
+views of the same scene. It also does not explain the failure: the nearest
+German bank photo is a median $8.8$\,km away against a $505$\,km German median,
+so the shortfall is not that no usable neighbour exists.
 
 \section{What did not work}
 
@@ -191,13 +190,16 @@ epochs 20--40, so single-fold gaps of that size are not decisive.
 
 \section{Limitations}
 
-Germany and France are the dominant failure and we did not solve them. The
-evidence locates the problem in the representation rather than the decoder, but
-we never ran the experiment that would say \emph{why} --- e.g.\ probing whether
-the descriptor carries any within-country position signal. Also: the
-failed-variant evidence is single-fold and confounded by epoch count, and the
-figures are rebuilt from cached out-of-fold predictions that are not in the
-repository, so they cannot be regenerated from a clean clone.
+Germany and France are the dominant failure and we did not solve them. Both
+stages break there: ${\sim}45\%$ of queries retrieve no nearby image into the
+top-200, and of those that do, most are then mis-ranked. Swapping the decoder
+does not help (\S6), which points at the shared descriptor, but we never ran
+the experiment that would say what it is missing --- e.g.\ probing whether it
+carries any within-country position signal --- so we cannot claim the failure
+is purely representational. Also: the ablation and failed-variant evidence is
+single-fold and confounded by epoch count, and the figures are rebuilt from
+cached out-of-fold predictions that are not in the repository, so they cannot
+be regenerated from a clean clone.
 
 \section{Submission}
 
