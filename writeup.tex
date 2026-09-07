@@ -1,14 +1,17 @@
-\documentclass[9pt,a4paper,twocolumn]{article}
+\documentclass[10pt,a4paper,twocolumn]{article}
 \usepackage[margin=1.5cm]{geometry}
 \usepackage{graphicx}
 \usepackage{booktabs}
 \usepackage{amsmath}
 \usepackage[hidelinks]{hyperref}
 \usepackage{caption}
+\usepackage[compact]{titlesec}
+\titlespacing*{\section}{0pt}{1.1ex plus 0.2ex minus 0.1ex}{0.6ex plus 0.1ex}
 \captionsetup{font=footnotesize,labelfont=bf,skip=3pt}
 \setlength{\parskip}{1.5pt}
 \setlength{\parindent}{0pt}
 \setlength{\columnsep}{0.65cm}
+\raggedbottom
 \pagestyle{empty}
 
 \title{\vspace{-2.2em}GeoMatch: photo geolocation as visual retrieval}
@@ -21,7 +24,7 @@
 
 \begin{figure*}[t]
 \centering
-\includegraphics[width=0.84\textwidth]{images/geomatch.png}
+\includegraphics[width=1.0\textwidth]{images/geomatch.png}
 \caption{One from-scratch RegNetY-400MF trunk, shared across a global view and
 two crops, feeds a global-descriptor retrieval branch and a local-token
 late-interaction reranker. Classification heads regularise training only.
@@ -91,25 +94,26 @@ classification regulariser.
 
 \begin{table}[h]
 \centering\footnotesize
-\setlength{\tabcolsep}{3pt}
-\begin{tabular}{lccccc}
+\setlength{\tabcolsep}{3.5pt}
+\begin{tabular}{@{}l@{\hspace{5pt}}ccccc@{}}
 \toprule
 pooled 5-fold OOF & runs & med. & mean & $<$200 & $<$750 \\
 \midrule
-Geo-cell classification (dropped) & 1 & 75.2 & --- & --- & --- \\
-From-scratch retrieval baseline   & 1 & 89.2 & 618 & 55.9\% & 69.4\% \\
-\;+ BYOL + country-aware, 22 ep   & 1 & 58.0 & 490 & 60.7\% & 76.2\% \\
-\;+ 40 epochs (shipped recipe)    & 3 & \textbf{56.8}$\pm$1.1 & 469 & 61.4\% & 77.1\% \\
+Geo-cell classification    & 1 & 75.2 & --- & --- & --- \\
+Retrieval baseline         & 1 & 89.2 & 618 & 55.9\% & 69.4\% \\
+\;+ BYOL, country-aware    & 1 & 58.0 & 490 & 60.7\% & 76.2\% \\
+\;+ 40 epochs (shipped)    & 3 & \textbf{56.8} & 469 & 61.4\% & 77.1\% \\
 \midrule
-\emph{(non-compliant)} 3-model ens. & 1 & 52.0 & --- & --- & --- \\
-\emph{(non-compliant)} 6-model ens. & 1 & 49.7 & --- & --- & --- \\
+3-model ensemble$^{\dagger}$ & 1 & 52.0 & --- & --- & --- \\
+6-model ensemble$^{\dagger}$ & 1 & 49.7 & --- & --- & --- \\
 \bottomrule
 \end{tabular}
-\caption{Median/mean in km. Shipped row is mean\,$\pm$\,s.d.\ of three seeds
-(55.60 / 57.12 / 57.71); \textbf{best observed 55.60}, but the submitted model
-uses the config's default seed, not among the three --- no seed was chosen on
-results. Geo-cell mean/rate columns were not retained. Ensembles are recorded
-as a real gain rejected on the one-model rule.}
+\caption{Median/mean in km. Row 3 is the 22-epoch recipe, row 4 the shipped
+40-epoch one: mean of three seeds (55.60 / 57.12 / 57.71, s.d.\ 1.1);
+\textbf{best observed 55.60}, but the submitted model uses the config's default
+seed, not among the three --- no seed was chosen on results. Geo-cell
+mean/rate columns were not retained. $^{\dagger}$Ensembles are a real gain
+rejected on the one-model rule.}
 \label{tab:main}
 \end{table}
 
