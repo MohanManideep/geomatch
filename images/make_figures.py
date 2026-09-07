@@ -178,13 +178,14 @@ def fig_error_map(final: pd.DataFrame, n: int = 220) -> None:
 
 
 # ---------------------------------------------------------------- Figure C
-def fig_oracle_gap() -> None:
+def error_decomposition() -> pd.DataFrame:
+    """Split every query into: decoded within 50 km / lost to ranking / lost to
+    recall. 'Lost to recall' means no <=50 km bank image was even retrieved into
+    the top-200, so no reranker could have fixed it."""
     import torch
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    ks = [10, 50, 100, 200]
-    oracle_w50 = {k: [] for k in ks}
-    decoded_all = []
+    recalled, decoded, country = [], [], []
     for f in range(5):
         d = np.load(OUT / f"regnet_cp_v13_feat_s1/fold_{f}.npz")
         vd = d["val_descriptor"].astype(np.float64)
@@ -192,46 +193,80 @@ def fig_oracle_gap() -> None:
         vd = vd / np.linalg.norm(vd, axis=1, keepdims=True)
         bd = bd / np.linalg.norm(bd, axis=1, keepdims=True)
         sim = torch.from_numpy(vd).to(device) @ torch.from_numpy(bd).to(device).T
-        for k in ks:
-            idx = torch.topk(sim, k, dim=1).indices.cpu().numpy()
-            cand = d["train_coordinates"][idx]
-            dist = hav(d["val_coordinates"][:, None, :], cand).min(axis=1)
-            oracle_w50[k].append(dist <= 50)
+        idx = torch.topk(sim, 200, dim=1).indices.cpu().numpy()
+        nearest = hav(d["val_coordinates"][:, None, :], d["train_coordinates"][idx])
+        recalled.append(nearest.min(axis=1) <= 50)
         pred = pd.read_csv(OUT / f"regnet_cp_v13_s1/fold_{f}/predictions_epoch_040.csv")
-        decoded_all.append(pred["distance_km"].to_numpy())
-    decoded_all = np.concatenate(decoded_all)
-    ys = [float(np.mean(np.concatenate(oracle_w50[k])) * 100) for k in ks]
-    y_decoded = float(np.mean(decoded_all <= 50) * 100)
+        decoded.append(pred["distance_km"].to_numpy() <= 50)
+        country.append(d["val_country"])
+    return pd.DataFrame(
+        {
+            "recalled": np.concatenate(recalled),
+            "decoded": np.concatenate(decoded),
+            "iso": [ISO[i] for i in np.concatenate(country)],
+        }
+    )
 
-    fig, ax = plt.subplots(figsize=(6.2, 4.6))
-    ax.plot(
-        ks,
-        ys,
-        marker="o",
-        color="#2471a3",
-        label="oracle: best of top-K is within 50 km",
+
+def fig_oracle_gap() -> None:
+    frame = error_decomposition()
+    rows = []
+    for iso, part in frame.groupby("iso"):
+        rows.append(
+            {
+                "iso": iso,
+                "decoded": part.decoded.mean() * 100,
+                "ranking": (part.recalled & ~part.decoded).mean() * 100,
+                "recall": (~part.recalled).mean() * 100,
+            }
+        )
+    table = pd.DataFrame(rows).sort_values("decoded", ascending=False)
+    pooled = {
+        "decoded": frame.decoded.mean() * 100,
+        "ranking": (frame.recalled & ~frame.decoded).mean() * 100,
+        "recall": (~frame.recalled).mean() * 100,
+    }
+
+    fig, ax = plt.subplots(figsize=(7.4, 4.0))
+    x = np.arange(len(table))
+    ax.bar(x, table.decoded, 0.72, color="#27ae60", label="located within 50 km")
+    ax.bar(
+        x,
+        table.ranking,
+        0.72,
+        bottom=table.decoded,
+        color="#e67e22",
+        label="retrieved but mis-ranked",
     )
-    ax.axhline(
-        y_decoded,
+    ax.bar(
+        x,
+        table.recall,
+        0.72,
+        bottom=table.decoded + table.ranking,
         color="#c0392b",
-        ls="--",
-        label=f"actually decoded top-1 ({y_decoded:.1f}%)",
+        label="never retrieved (top-200)",
     )
-    ax.set_xscale("log")
-    ax.set_xticks(ks)
-    ax.set_xticklabels(ks)
-    ax.set_xlabel("shortlist depth K")
-    ax.set_ylabel("% of rows within 50 km")
+    ax.set_xticks(x)
+    ax.set_xticklabels(table.iso)
+    ax.set_ylim(0, 100)
+    ax.set_ylabel("% of queries")
     ax.set_title(
-        "The right candidate is usually in the list;\nthe decoder doesn't always pick it"
+        f"Pooled: {pooled['decoded']:.0f}% located  |  "
+        f"{pooled['ranking']:.0f}% retrieved but mis-ranked  |  "
+        f"{pooled['recall']:.0f}% never retrieved",
+        fontsize=10,
     )
-    ax.legend(frameon=False, fontsize=9)
+    ax.legend(
+        frameon=False,
+        fontsize=8.5,
+        ncol=3,
+        loc="lower center",
+        bbox_to_anchor=(0.5, -0.22),
+    )
     fig.tight_layout()
     fig.savefig(FIG_DIR / "oracle_gap.png", dpi=180)
     plt.close(fig)
-    print(
-        f"wrote oracle_gap.png (oracle@K={dict(zip(ks, [round(y,1) for y in ys]))}, decoded={y_decoded:.1f})"
-    )
+    print("wrote oracle_gap.png", {k: round(v, 1) for k, v in pooled.items()})
 
 
 # ---------------------------------------------------------------- Figure D

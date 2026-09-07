@@ -32,7 +32,7 @@ one, fixed epoch count, no checkpoint selection):
 2. **Country-aware retrieval fine-tuning**
    (`src/country_aware_retrieval_finetune.py`, config `configs/final_recipe.json`)
    — spatial listwise + local listwise + triplet + local-verification losses,
-   geographic positives within 35 km, same-country hard negatives re-mined each
+   geographic positives within 50 km, same-country hard negatives (60–700 km) re-mined each
    epoch, anchor oversampling for the weakest countries (DE, FR, PL, IT, ES, SE,
    GB), EMA teacher, 40 epochs.
 
@@ -43,9 +43,11 @@ existing backbone, so end to end it is ≈ 70 min plus ≈ 5 min to write
 
 ## Results
 
-Pooled 5-fold out-of-fold median haversine error: **55.6 km** (best of three
-seeds; 49.1% of images within 50 km). The submitted model retrains the same
-recipe on all 11,758 images.
+Pooled 5-fold out-of-fold median haversine error, over three independently
+seeded runs of the shipped recipe: **56.8 ± 1.1 km** (55.60 / 57.12 / 57.71;
+best observed 55.60). The submitted model retrains the same recipe on all
+11,758 images using the config's default seed, which was not among the three
+evaluated — no seed was selected on evaluation results.
 
 Self-supervised pretraining plus the country-aware retrieval finetune cut the
 per-country error across the board versus a plain from-scratch retrieval
@@ -54,11 +56,14 @@ country:
 
 ![Median error by country](images/figures/per_country_median.png)
 
-The bottleneck is ranking, not recall: a within-50 km training image is in the
-retrieval top-200 for ~80% of queries, but the decoder selects it only ~49% of
-the time, and the gap is worst for DE/FR.
+Splitting every query into *located* (≤50 km), *retrieved but mis-ranked*, and
+*never retrieved into the top-200* separates the two failure modes. Pooled, the
+split is 49.1% / 30.3% / 20.7% — ranking is the larger single loss, but recall
+failure is not negligible. For Germany it is 14.2% / 40.6% / **45.2%**: nearly
+half of German queries never retrieve a nearby image at all, so both stages fail
+there and no reranker could have fixed it.
 
-![Oracle vs decoded](images/figures/oracle_gap.png)
+![Error decomposition by country](images/figures/oracle_gap.png)
 
 ![Where the misses are](images/figures/error_map.png)
 
@@ -120,6 +125,12 @@ runs the top-200 shortlist + late-interaction rerank and writes
 # regenerate report figures from saved predictions
 python images/make_figures.py
 ```
+
+Note: `make_figures.py` reads cached out-of-fold predictions and descriptor
+caches under `/var/tmp/luli38se-geomatch/outputs/`, which are training outputs
+and are **not** checked into this repository. The committed figures cannot be
+reproduced from a clean clone without first re-running the cross-validation
+above. `images/geomatch.png` is drawn by hand, not generated.
 
 ## Formatting
 

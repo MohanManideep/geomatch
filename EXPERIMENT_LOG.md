@@ -128,7 +128,7 @@ All cluster in the 55.6-59.2 km band -- i.e. this is the honest, reproducible
 performance envelope of one <=5M-parameter, from-scratch, SSL+retrieval model
 on this data, independent of random seed. **The best-performing recipe**
 (`configs/final_recipe.json`: grid-4 local tokens, 40-epoch finetune, tightened
-hard-negative band 40-400 km, geographic positives <=35 km, DE/FR/PL/IT/ES/SE/GB
+same-country hard-negative band 60-700 km, geographic positives <=50 km, DE/FR/PL/IT/ES/SE/GB
 anchor oversampling) is the final architecture. The submitted model is this
 recipe retrained once on **all** 11,758 labelled images (no held-out fold), per
 `artifacts/final_full_data/`.

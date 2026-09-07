@@ -13,10 +13,13 @@ fixed epoch count, no checkpoint selection on the eval fold) unless noted.
   classification heads (country + coarse/a/b/c/fine geo-cells), decoded via a
   combinatorial partition decoder (best cell combination -> centroid).
 - **Result:** 75.16 km median at the best checkpoint.
-- **Issue:** classification-only decoding quantizes location to a fixed cell
-  grid; can't get closer than the cell resolution. Retrieval (next section)
-  gives a continuous coordinate and reached lower error at a similar
-  parameter budget, so this line was dropped.
+- **Issue:** classification decoding is bounded by the cell resolution.
+  Retrieval (next section) is also discrete -- it can only return one of the
+  11,758 training coordinates -- but that is a much finer grid: the
+  geographically nearest training photo to a held-out photo is a median 3.1 km
+  away and within 50 km for 99.8% of rows, so the discretisation is nowhere
+  near binding. Retrieval reached lower error at a similar parameter budget,
+  so this line was dropped.
 
 ### 2. Three-view retrieval + local late-interaction (locked baseline)
 - **Experiment:** same shared from-scratch backbone, but descriptors instead
@@ -26,7 +29,9 @@ fixed epoch count, no checkpoint selection on the eval fold) unless noted.
 - **Result:** **89.16 km / 45.4% within 50 km.**
 - **Issue:** diagnosed with a shortlist-depth audit: a <=50 km candidate is in
   the top-200 for ~80% of rows, but the decoder only picks it ~45% of the
-  time -- a ranking problem, not a recall problem, worst for Germany/France.
+  time. Ranking is the larger loss pooled -- but ~20% of rows never retrieve a
+  nearby candidate at all, and in Germany/France that recall failure is ~45%,
+  so it is *both* a ranking and a recall problem, not purely the former.
 
 ### 3. Linear metric / MLP candidate ranker on frozen baseline descriptors
 - **Experiment:** learn a small linear or MLP scorer over the top-K shortlist
@@ -117,12 +122,16 @@ fixed epoch count, no checkpoint selection on the eval fold) unless noted.
   free architecture change -- the token projection layer is grid-size
   independent, so parameter count is unaffected), 48 epochs instead of 22,
   tighter hard-negative/positive distance bands.
-- **Result:** **worse** -- 61.8 km vs. 53.6 km on a matched fold, and the
-  validation curve visibly overfits past epoch 36 (dips to ~59 km around
-  epoch 30, drifts back up to 61.8 by epoch 48).
-- **Issue:** finer spatial resolution in the local matcher did not help
-  distinguish Germany/France street scenes from each other -- more evidence
-  the bottleneck is representational, not resolution.
+- **Result:** **inconclusive, not a failure.** At matched epochs on fold 0 the
+  8x8 grid is within noise of the shipped 4x4 (58.3 vs 60.7 km at epoch 40;
+  64.1 vs 60.2 at epoch 20; 59.0 vs 61.1 at epoch 36). Only the extension to
+  48 epochs drifts back up, to 61.8 km.
+- **Issue:** the earlier "8x8 failed" verdict compared its epoch-48 endpoint
+  against a *different* variant's epoch-22 number -- an unfair comparison. The
+  honest reading: finer tokens bought nothing measurable, and training past
+  ~40 epochs drifts upward. 4x4 was kept as the simpler option. Note the
+  shipped recipe's own fold-0 median wanders between 58.1 and 63.4 km over
+  epochs 20-40, so single-fold gaps under ~3 km carry no signal.
 
 ### 12. Ensembling multiple independently-seeded models
 - **Experiment:** L2-normalise and average the descriptors and local
@@ -138,16 +147,19 @@ fixed epoch count, no checkpoint selection on the eval fold) unless noted.
   individual seeds beat 55.6 km alone -- the gain is purely from averaging.)
 
 ### 13. Final decision: one model, the shipped recipe
-- **Experiment:** compare six independently-seeded single-model runs from
-  the SSL + country-aware-finetune family (experiments #9 and #12) on their
-  own, un-ensembled, pooled OOF score.
-- **Result:** 57.66 / 59.17 / 55.84 / **55.60** / 57.12 / 57.63 km -- all six
-  land in a tight 55.6-59.2 km band regardless of seed. This is the honest,
-  reproducible performance envelope of one <=5M-parameter, from-scratch,
-  SSL-pretrained retrieval model on this data.
-- **Decision:** ship the best-performing single recipe (grid-4 local tokens,
-  40-epoch finetune, hard-negative band 40-400 km, geographic positives
-  <=35 km, DE/FR/PL/IT/ES/SE/GB anchor oversampling), retrained once on
+- **Experiment:** compare independently-seeded single-model runs on their own,
+  un-ensembled, pooled OOF score.
+- **Result:** three seeds of the **exact shipped config** give 55.60 / 57.12 /
+  57.71 km -> mean **56.8 +/- 1.1**, median 57.12, best observed 55.60. Three
+  further runs of *earlier* configs in the same family (22-epoch, and two
+  variants) give 57.66 / 59.17 / 55.84, so the whole family spans 55.6-59.2 km.
+  Quoting 55.60 alone would be cherry-picking the best of three; the mean is
+  the honest headline. Seed-to-seed spread (~1.1 km) is larger than the
+  difference between the 22- and 40-epoch recipes, so the extra epochs are not
+  a demonstrated improvement.
+- **Decision:** ship the recipe (grid-4 local tokens,
+  40-epoch finetune, same-country hard-negative band 60-700 km, geographic
+  positives <=50 km, DE/FR/PL/IT/ES/SE/GB anchor oversampling), retrained once on
   **all** 11,758 labelled images (no held-out fold) for the actual
   submission.
 
@@ -155,12 +167,17 @@ fixed epoch count, no checkpoint selection on the eval fold) unless noted.
 
 ## Summary
 
-| stage | pooled OOF median | notable for |
-|---|---:|---|
-| Geo-cell classification (abandoned architecture) | 75.16 km | why classification-only decoding was dropped |
-| **Locked baseline (retrieval + late-interaction)** | **89.16 km** | starting point; the ranking-gap diagnosis |
-| SSL + country-aware finetune | 57.66 km | the one big architectural win |
-| Crop-augmentation variant | worse (fold: 63.7 vs 53.6) | a plausible fix that backfired |
-| Finer-token / longer-training variant | worse (fold: 61.8 vs 53.6) | overfitting, capacity isn't the bottleneck |
-| Ensembles (3/6 models) | 52.0 / 49.65 km | effective but **not compliant** -- excluded |
-| **Final single-model recipe** | **55.60 km** (best seed) | what's actually submitted |
+| stage | pooled OOF median | evidence | notable for |
+|---|---:|---|---|
+| Geo-cell classification (abandoned architecture) | 75.16 km | 5-fold | why classification decoding was dropped |
+| **Locked baseline (retrieval + late-interaction)** | **89.16 km** | 5-fold | starting point; the error decomposition |
+| SSL + country-aware finetune, 22 ep | 57.66 km | 5-fold | the one large win (-31 km) |
+| **Shipped recipe, 40 ep** | **56.8 ± 1.1 km** (3 seeds) | 5-fold ×3 | what's submitted; best seed 55.60 |
+| Crop-augmentation variant | worse at every matched epoch (63.7 vs 58.1 @32) | fold 0 only | a plausible fix that backfired |
+| Finer-token (8×8) variant | within noise (58.3 vs 60.7 @40) | fold 0 only | bought nothing; 48 ep drifts to 61.8 |
+| Ensembles (3/6 models) | 52.0 / 49.65 km | 5-fold | effective but **not compliant** -- excluded |
+
+Error decomposition of the shipped recipe (pooled OOF): 49.1% located within
+50 km, 30.3% retrieved-but-mis-ranked, 20.7% never retrieved into the top-200.
+For Germany those are 14.2 / 40.6 / 45.2 -- i.e. both recall and ranking fail
+there, so no reranking fix could have closed that gap.
