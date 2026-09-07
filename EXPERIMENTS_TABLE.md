@@ -89,8 +89,8 @@ fixed epoch count, no checkpoint selection on the eval fold) unless noted.
 - **Result:** DE 490 km / FR 523 km -- **barely better** than retrieval's
   534/551 km, i.e. still catastrophic.
 - **Issue:** two decoders reading the same descriptor fail equally, which
-  locates the problem upstream of the decoder. It does not establish *what*
-  the descriptor is missing -- we never probed that directly.
+  suggests a shared representation limitation, but does not isolate the cause
+  -- we never probed the descriptor directly.
 
 ### 9. BYOL self-supervised pretraining + country-aware retrieval finetune
 - **Experiment:** pretrain the backbone with BYOL (negative-free

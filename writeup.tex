@@ -175,8 +175,8 @@ gave 72\,km against 57.7. Gating the shortlist on predicted country cost 4\,km
 pooled (country accuracy is 68\%, and a wrong gate is unrecoverable). Decoding
 from the auxiliary geo-cell head instead of retrieval gave DE 490 / FR 523\,km
 against that encoder's retrieval 534 / 551: two decoders reading one descriptor
-fail equally, which locates the problem upstream of the decoder --- though it
-does not establish what the descriptor is missing.
+fail equally, which suggests a shared representation limitation, but does not
+isolate the cause.
 
 \textbf{Encoder variants (fold 0 only --- weaker evidence).} Adding a
 random-resized-crop to the global view was worse at every matched epoch
@@ -196,8 +196,9 @@ top-200, and of those that do, most are then mis-ranked. Swapping the decoder
 does not help (\S6), which points at the shared descriptor, but we never ran
 the experiment that would say what it is missing --- e.g.\ probing whether it
 carries any within-country position signal --- so we cannot claim the failure
-is purely representational. Also: the ablation and failed-variant evidence is
-single-fold and confounded by epoch count, and the figures are rebuilt from
+is purely representational. Also: the encoder-variant experiments and component
+comparisons are single-fold, and several comparisons use unequal training
+schedules; and the figures are rebuilt from
 cached out-of-fold predictions that are not in the repository, so they cannot
 be regenerated from a clean clone.
 

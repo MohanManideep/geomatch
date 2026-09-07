@@ -57,9 +57,9 @@ decode time. None beat the plain blend:
 - **Geo-cell classification decode** (`42_geocell_decode.py`): the model's own
   fine-grained classification heads (240 cells) are *just as lost* on DE/FR as
   retrieval (argmax decode: DE 490 km / FR 523 km, vs retrieval's 534/551).
-  Two decoders that read the same descriptor fail equally, which is evidence
-  that the problem is upstream of the decoder. It does not establish *what* the
-  descriptor is missing -- we never tested that directly.
+  Two decoders that read the same descriptor fail equally, which suggests a
+  shared representation limitation, but does not isolate the cause -- we never
+  probed the descriptor directly.
 
 ## 3. SSL pretraining + country-aware finetune (the real encoder win)
 
