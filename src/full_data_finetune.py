@@ -51,7 +51,7 @@ TEACHER_CACHE_FOLD = 0
 DEFAULT_BACKBONE = Path(
     "/var/tmp/luli38se-geomatch/outputs/ssl_backbone/fold_2/backbone.pt"
 )
-DEFAULT_OUTPUT = Path("/var/tmp/luli38se-geomatch/outputs/regnet_cp_full_data")
+DEFAULT_OUTPUT = Path("/var/tmp/luli38se-geomatch/outputs/full_data")
 DEFAULT_NORMALIZATION = ROOT / "artifacts/normalization/fold_0.json"
 ASSET_ROOT = ROOT / "artifacts/fold_assignments"
 CHECKPOINT_FORMAT = "geomatch-regnet-full-data-retrieval-checkpoint"

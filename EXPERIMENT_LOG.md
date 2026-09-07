@@ -6,16 +6,18 @@ why. Numbers are pooled 5-fold out-of-fold (OOF) median haversine km on the
 generated (`splits/folds_seed42.csv`) was used strictly as train-on-4/eval-on-1,
 fixed epoch count, no checkpoint selection on the validation fold.
 
-Everything in `archive/` referenced below is kept for reproducibility of these
-claims; it is not part of the final submitted pipeline.
+The superseded experiments below were run in this project but their code and
+checkpoints are not part of the submission and are not in this repository; the
+numbers are quoted from the runs that produced them. Only the pipeline in
+`src/` is submitted.
 
 ## 0. Earlier architecture (abandoned): joint geo-cell classification
 
 A from-scratch RegNetY-400MF with hierarchical geo-cell classification heads
 (coarse/a/b/c/fine, decoded via a combinatorial partition decoder) reached
-75.16 km median at its best checkpoint (see `archive/docs/V4_LOCAL_RETRIEVAL_RESULTS.md`,
-`archive/v2_joint_classification/`). Superseded by the retrieval line below,
-which reached lower error with a similar parameter budget.
+75.16 km median at its best checkpoint. Superseded by the retrieval line below,
+which reached lower error with a similar parameter budget. Its frozen
+descriptors survive as the distillation targets in `artifacts/teacher_cache`.
 
 ## 1. Locked baseline: three-view retrieval + local late-interaction
 
@@ -26,8 +28,8 @@ ColBERT/MaxSim-style late-interaction rerank. Decode: cosine top-200 shortlist o
 the descriptor, rerank by 0.2*global + 0.8*local, take top-1's coordinates.
 **4,869,911 trainable parameters.**
 
-- **89.16 km / 45.4% within 50 km** (locked, `archive/.../regnet_cp_v6_locked_oof` snapshot).
-- Diagnosis (`archive/retrieval_experiments/src/31_deep_shortlist_recall_audit.py`):
+- **89.16 km / 45.4% within 50 km.**
+- Diagnosis, from a deep-shortlist recall audit:
   a <=50 km candidate sits in the retrieval top-200 for ~80% of rows, but the
   decoder only picks it for 45% -- a large ranking gap, worst for DE/FR (oracle@50
   ~35%/43%). Both stages fail there: ranking is the larger loss pooled, but
@@ -38,23 +40,22 @@ the descriptor, rerank by 0.2*global + 0.8*local, take top-1's coordinates.
 Every one of these left the encoder untouched and tried to fix ranking at
 decode time. None beat the plain blend:
 
-- **Linear metric / residual pairwise reranker** (`27`, `28`, `33` + `configs
-  archived`): looked fine on a random held-out training slice, degraded the
+- **Linear metric / residual pairwise reranker**: looked fine on a random held-out training slice, degraded the
   real crossfit (near-duplicate photos in the random slice leak).
-- **Honest reranker with an inner-fold holdout** (`37_crossfit_v9_reranker.py`):
+- **Honest reranker with an inner-fold holdout**:
   passed its own generalisation gate but STILL degraded the real crossfit
   (+7.9 km) -- root cause found later (section 4).
 - **Whitening / query expansion, local-token first-stage**: no measurable gain.
-- **Spatial-consensus / kernel-density mode decoding** (`38_v9c_consensus_decode.py`):
+- **Spatial-consensus / kernel-density mode decoding**:
   full grid over shortlist depth / kernel bandwidth / temperature; best setting
   was *worse* than the plain blend (72 km vs 57.7 km) -- popular/dense bank
   regions out-vote the true location.
-- **Country-gated shortlist / DE-FR bank routing** (`41_routed_decode.py`):
+- **Country-gated shortlist / DE-FR bank routing**:
   restricting the shortlist to the query's predicted country. When gated on the
   *true* country this looks great; gated on the *predicted* country (all we
   actually have) it is worse overall (52 -> 56 km), because country prediction
   itself is only ~68% accurate and a wrong gate is catastrophic.
-- **Geo-cell classification decode** (`42_geocell_decode.py`): the model's own
+- **Geo-cell classification decode**: the model's own
   fine-grained classification heads (240 cells) are *just as lost* on DE/FR as
   retrieval (argmax decode: DE 490 km / FR 523 km, vs retrieval's 534/551).
   Two decoders that read the same descriptor fail equally, which suggests a
@@ -83,7 +84,7 @@ counts differ, so treat as indicative):
 |---|---:|
 | locked baseline (no BYOL, no country-aware), ep 6 | 76.13 km |
 | + country-aware finetune from baseline weights, ep 12 | 69.96 km |
-| + country-aware from a *v2-joint* start, ep 24 | 71.86 km |
+| + country-aware from the geo-cell model's weights, ep 24 | 71.86 km |
 | + BYOL init instead of baseline weights, ep 22 | **53.56 km** |
 
 The runs including BYOL are the lowest by a wide margin, but the conditions
@@ -129,9 +130,7 @@ submitted model must have <=5,000,000 parameters" (singular). Each model here
 is individually compliant (4,869,911 params) but an ensemble of N of them is
 not one <=5M-parameter model -- it is N times that. The improvement is real
 but not a legal submission, so none of these ensembled numbers are the
-project's final result. (This mirrors a note already left in
-`archive/docs/FINAL_TRAINING.md` from the earlier classification architecture:
-"... or ensemble models are used.")
+project's final result.
 
 ## 6. Final decision
 

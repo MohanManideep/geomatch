@@ -1125,12 +1125,12 @@ def main() -> int:
             raise ValueError(f"{name} must be positive")
     fold = int(args.fold)
     source_path = (
-        OUTPUT_ROOT / f"regnet_cp_v2_joint/fold_{fold}/epoch_009.pt"
+        OUTPUT_ROOT / f"geocell_model/fold_{fold}/epoch_009.pt"
         if args.source is None
         else args.source
     ).resolve()
     output = (
-        OUTPUT_ROOT / f"regnet_cp_v3_retrieval/fold_{fold}"
+        OUTPUT_ROOT / f"retrieval_baseline/fold_{fold}"
         if args.output is None
         else args.output
     ).resolve()

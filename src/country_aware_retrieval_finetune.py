@@ -69,8 +69,7 @@ DEFAULT_CONFIG = ROOT / "configs/final_recipe.json"
 DEFAULT_IMAGES = Path("/var/tmp/luli38se-geomatch/data/geo_dataset/train")
 DEFAULT_TEACHER_CACHE = ROOT / "artifacts/teacher_cache"
 OUTPUT_ROOT = Path("/var/tmp/luli38se-geomatch/outputs")
-LOCKED_BASELINE_ROOT = OUTPUT_ROOT / "regnet_cp_v6_locked_oof"
-DEFAULT_OUTPUT = OUTPUT_ROOT / "regnet_cp_v8_country_aware"
+DEFAULT_OUTPUT = OUTPUT_ROOT / "country_aware_oof"
 CONFIG_FORMAT = "geomatch-regnet-country-aware-retrieval-finetune"
 CHECKPOINT_FORMAT = "geomatch-regnet-country-aware-retrieval-checkpoint"
 
@@ -343,46 +342,10 @@ def anchor_row_weights(countries: np.ndarray, config: dict) -> np.ndarray:
 def load_start_model(
     fold: int, config: dict, device: torch.device
 ) -> tuple[GeoCPRegNetRetrieval, dict]:
-    source = str(config.get("start_from", "regnet_cp_v6_locked_oof"))
+    source = str(config.get("start_from", "ssl_backbone"))
     grid = int(config.get("local_grid_size", 4))
     model = GeoCPRegNetRetrieval(local_features=64, local_grid_size=grid).to(device)
-    if grid != 4 and source != "ssl_backbone":
-        raise ValueError(
-            "local_grid_size != 4 requires start_from=ssl_backbone (earlier heads are 4x4)"
-        )
-    if source == "regnet_cp_v6_locked_oof":
-        path = LOCKED_BASELINE_ROOT / f"fold_{fold}" / "epoch_006.pt"
-        checkpoint = torch.load(path, map_location="cpu", weights_only=False)
-        if checkpoint.get("format") != "geomatch-regnet-spatial-retrieval-checkpoint":
-            raise ValueError(f"Unexpected locked-baseline checkpoint format at {path}")
-        if int(checkpoint.get("epoch", -1)) != 6:
-            raise ValueError(
-                f"Expected the locked epoch-6 baseline checkpoint at {path}"
-            )
-        model.load_state_dict(checkpoint["ema"]["model"], strict=True)
-        provenance = {
-            "start_from": source,
-            "checkpoint": str(path),
-            "sha256": sha256_file(path),
-        }
-    elif source == "regnet_cp_v2_joint":
-        source_epoch = int(config.get("source_epoch", 9))
-        path = (
-            OUTPUT_ROOT / f"regnet_cp_v2_joint/fold_{fold}/epoch_{source_epoch:03d}.pt"
-        )
-        checkpoint = torch.load(path, map_location="cpu", weights_only=False)
-        if checkpoint.get("format") != "geomatch-regnet-joint-finetune-checkpoint":
-            raise ValueError(f"Unexpected joint checkpoint format at {path}")
-        if int(checkpoint.get("epoch", -1)) != source_epoch:
-            raise ValueError(f"Joint checkpoint at {path} is not epoch {source_epoch}")
-        TRAINER.load_encoder_state_dict(model, checkpoint["model"])
-        provenance = {
-            "start_from": source,
-            "checkpoint": str(path),
-            "sha256": sha256_file(path),
-            "source_epoch": source_epoch,
-        }
-    elif source == "ssl_backbone":
+    if source == "ssl_backbone":
         path = Path(config["ssl_backbone_path"].replace("{fold}", str(fold)))
         checkpoint = torch.load(path, map_location="cpu", weights_only=False)
         if checkpoint.get("format") != "geomatch-regnet-cp-ssl-byol-backbone-v1":

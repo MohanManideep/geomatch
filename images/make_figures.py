@@ -57,7 +57,7 @@ def hav(a, b):
 
 
 def load_baseline() -> pd.DataFrame:
-    df = pd.read_csv(OUT / "regnet_cp_v6_locked_oof" / "pooled_oof_predictions.csv")
+    df = pd.read_csv(OUT / "baseline_oof" / "pooled_oof_predictions.csv")
     df["true_iso"] = df["true_country"].map(lambda i: ISO[i])
     return df
 
@@ -66,7 +66,7 @@ def load_final() -> pd.DataFrame:
     parts = []
     for f in range(5):
         parts.append(
-            pd.read_csv(OUT / f"regnet_cp_v13_s1/fold_{f}/predictions_epoch_040.csv")
+            pd.read_csv(OUT / f"oof_seed220517/fold_{f}/predictions_epoch_040.csv")
         )
     df = pd.concat(parts, ignore_index=True)
     df["true_iso"] = df["true_country"].map(lambda i: ISO[i])
@@ -187,7 +187,7 @@ def error_decomposition() -> pd.DataFrame:
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     recalled, decoded, country = [], [], []
     for f in range(5):
-        d = np.load(OUT / f"regnet_cp_v13_feat_s1/fold_{f}.npz")
+        d = np.load(OUT / f"oof_seed220517_features/fold_{f}.npz")
         vd = d["val_descriptor"].astype(np.float64)
         bd = d["train_descriptor"].astype(np.float64)
         vd = vd / np.linalg.norm(vd, axis=1, keepdims=True)
@@ -196,7 +196,7 @@ def error_decomposition() -> pd.DataFrame:
         idx = torch.topk(sim, 200, dim=1).indices.cpu().numpy()
         nearest = hav(d["val_coordinates"][:, None, :], d["train_coordinates"][idx])
         recalled.append(nearest.min(axis=1) <= 50)
-        pred = pd.read_csv(OUT / f"regnet_cp_v13_s1/fold_{f}/predictions_epoch_040.csv")
+        pred = pd.read_csv(OUT / f"oof_seed220517/fold_{f}/predictions_epoch_040.csv")
         decoded.append(pred["distance_km"].to_numpy() <= 50)
         country.append(d["val_country"])
     return pd.DataFrame(
@@ -294,8 +294,10 @@ def _smooth(ys, window=3):
 
 
 def fig_training_curves() -> None:
-    x_variant, y_variant = load_curve(OUT / "regnet_cp_v12_s1/fold_0/metrics.jsonl")
-    x_final, y_final = load_curve(OUT / "regnet_cp_v13_s1/fold_0/metrics.jsonl")
+    x_variant, y_variant = load_curve(
+        OUT / "oof_finer_tokens_seed900001/fold_0/metrics.jsonl"
+    )
+    x_final, y_final = load_curve(OUT / "oof_seed220517/fold_0/metrics.jsonl")
     y_variant_s, y_final_s = _smooth(y_variant), _smooth(y_final)
     fig, ax = plt.subplots(figsize=(6.4, 4.6))
     ax.plot(x_variant, y_variant, color="#c0392b", alpha=0.25, lw=1)
@@ -369,18 +371,18 @@ def fig_examples(final: pd.DataFrame) -> None:
 
 REQUIRED_INPUTS = {
     "baseline OOF predictions (retrieval baseline, 89.2 km)": [
-        OUT / "regnet_cp_v6_locked_oof/pooled_oof_predictions.csv"
+        OUT / "baseline_oof/pooled_oof_predictions.csv"
     ],
     "shipped-recipe OOF predictions (seed 220517, 55.60 km)": [
-        OUT / f"regnet_cp_v13_s1/fold_{fold}/predictions_epoch_040.csv"
+        OUT / f"oof_seed220517/fold_{fold}/predictions_epoch_040.csv"
         for fold in range(5)
     ],
     "shipped-recipe descriptor caches (seed 220517)": [
-        OUT / f"regnet_cp_v13_feat_s1/fold_{fold}.npz" for fold in range(5)
+        OUT / f"oof_seed220517_features/fold_{fold}.npz" for fold in range(5)
     ],
     "training curves (seed 220517 and the 8x8-token variant, seed 900001)": [
-        OUT / "regnet_cp_v13_s1/fold_0/metrics.jsonl",
-        OUT / "regnet_cp_v12_s1/fold_0/metrics.jsonl",
+        OUT / "oof_seed220517/fold_0/metrics.jsonl",
+        OUT / "oof_finer_tokens_seed900001/fold_0/metrics.jsonl",
     ],
     "training images": [TRAIN_IMAGES],
 }

@@ -2981,7 +2981,9 @@
       "validation_rows": 2350
     }
   ],
-  "format": "geomatch-regnet-cp-v2-official-geography-report-v1",
+  "folds_csv": "splits/folds_seed42.csv",
+  "folds_csv_sha256": "b96837109ef7afbba95b7ed661a1a9e250873b6018f6a1e85930396a31f2af47",
+  "format": "geomatch-geography-report-v1",
   "independent_fine_240_oracle": {
     "mean_km": 45.79535526950462,
     "median_km": 42.02083098183884,
@@ -2998,8 +3000,6 @@
     "within_200_pct": 99.98299030447355,
     "within_25_pct": 37.29375744174179
   },
-  "official_csv": "/home/utn/luli38se/GeoMatch/geomatch_regnet_cp_v2/splits/official_folds_seed42.csv",
-  "official_csv_sha256": "b96837109ef7afbba95b7ed661a1a9e250873b6018f6a1e85930396a31f2af47",
   "partitions": {
     "a": {
       "regions_per_country": 8,
