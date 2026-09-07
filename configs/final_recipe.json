@@ -114,5 +114,5 @@
     "development_fold_advance_median_km": 73.0,
     "project_complete_pooled_oof_median_km": 40.0
   },
-  "ssl_backbone_path": "/var/tmp/luli38se-geomatch/outputs/regnet_cp_ssl_backbone_full/fold_{fold}/backbone.pt"
+  "ssl_backbone_path": "/var/tmp/luli38se-geomatch/outputs/ssl_backbone/fold_{fold}/backbone.pt"
 }

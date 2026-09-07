@@ -38,7 +38,7 @@ from training import atomic_json, atomic_torch_save, set_seed, sha256_file
 
 ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_IMAGES = Path("/var/tmp/luli38se-geomatch/data/geo_dataset/train")
-DEFAULT_OUTPUT = Path("/var/tmp/luli38se-geomatch/outputs/regnet_cp_ssl_backbone")
+DEFAULT_OUTPUT = Path("/var/tmp/luli38se-geomatch/outputs/ssl_backbone")
 FORMAT = "geomatch-regnet-cp-ssl-byol-backbone-v1"
 
 

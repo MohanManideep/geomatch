@@ -27,9 +27,7 @@ TRAINER = cv.TRAINER
 COMMON = cv.COMMON
 
 DATA_ROOT = Path("/var/tmp/luli38se-geomatch/data/geo_dataset")
-DEFAULT_MODEL = Path(
-    "/var/tmp/luli38se-geomatch/outputs/regnet_cp_full_data/model_final.pt"
-)
+DEFAULT_MODEL = ROOT / "model/model_final.pt"
 DEFAULT_NORMALIZATION = ROOT / "artifacts/normalization/fold_0.json"
 DEFAULT_OUTPUT = ROOT / "predictions.csv"
 ASSET_ROOT = ROOT / "artifacts/fold_assignments"

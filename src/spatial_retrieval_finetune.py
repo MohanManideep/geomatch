@@ -1,4 +1,15 @@
-"""End-to-end spatial retrieval fine-tuning on one outer fold."""
+"""Spatial retrieval fine-tuning on one outer fold.
+
+This module trained the locked retrieval baseline (89.2 km). The submitted
+pipeline no longer runs it as a program -- ``country_aware_retrieval_finetune``
+and ``full_data_finetune`` import it for the training step, the deterministic
+encoder, the retrieval evaluation and the batch sampler, and only those parts
+are exercised. Its own ``main()`` needs ``configs/retrieval_finetune.json`` and
+the joint-classification checkpoints it continued from, neither of which is in
+this repository, so it refuses to start rather than failing partway through.
+``--self-test`` runs without either and checks the objective, the sampler and
+the parameter count.
+"""
 
 from __future__ import annotations
 
@@ -59,9 +70,7 @@ from training import (
 ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_CONFIG = ROOT / "configs/retrieval_finetune.json"
 DEFAULT_IMAGES = Path("/var/tmp/luli38se-geomatch/data/geo_dataset/train")
-DEFAULT_EVIDENCE = Path(
-    "/var/tmp/luli38se-geomatch/outputs/regnet_cp_v2_failure_audit/evidence"
-)
+DEFAULT_TEACHER_CACHE = ROOT / "artifacts/teacher_cache"
 OUTPUT_ROOT = Path("/var/tmp/luli38se-geomatch/outputs")
 COMMON_PATH = ROOT / "src/retrieval_common.py"
 SOURCE_FORMAT = "geomatch-regnet-joint-finetune-checkpoint"
@@ -161,7 +170,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--fold", type=int, default=0, choices=range(5))
     parser.add_argument("--config", type=Path, default=DEFAULT_CONFIG)
     parser.add_argument("--images", type=Path, default=DEFAULT_IMAGES)
-    parser.add_argument("--evidence", type=Path, default=DEFAULT_EVIDENCE)
+    parser.add_argument("--teacher-cache", type=Path, default=DEFAULT_TEACHER_CACHE)
     parser.add_argument("--source", type=Path)
     parser.add_argument("--output", type=Path)
     parser.add_argument("--resume", type=Path)
@@ -261,7 +270,7 @@ def build_retrieval_fingerprint(
     fold: int,
     config_path: Path,
     source_path: Path,
-    evidence_path: Path,
+    teacher_cache_path: Path,
 ) -> dict:
     base = build_fingerprint(fold)
     files = {
@@ -271,7 +280,7 @@ def build_retrieval_fingerprint(
         "trainer": ROOT / "src/spatial_retrieval_finetune.py",
         "common": COMMON_PATH,
         "source_checkpoint": source_path,
-        "evidence": evidence_path,
+        "teacher_cache": teacher_cache_path,
     }
     missing = [str(path) for path in files.values() if not path.is_file()]
     if missing:
@@ -294,7 +303,7 @@ def build_retrieval_fingerprint(
 def validate_source(
     checkpoint: dict,
     source_path: Path,
-    evidence,
+    teacher,
     config: dict,
     fold: int,
 ) -> None:
@@ -304,12 +313,14 @@ def validate_source(
         raise ValueError("Source epoch differs")
     if int(checkpoint.get("fingerprint", {}).get("fold", -1)) != fold:
         raise ValueError("Source belongs to another fold")
-    if sha256_file(source_path) != evidence.checkpoint_sha256:
-        raise ValueError("Source checkpoint differs from cached failure evidence")
+    if sha256_file(source_path) != teacher.descriptor_checkpoint_sha256:
+        raise ValueError(
+            "Source checkpoint differs from the one the teacher cache was built from"
+        )
 
 
 def sampling_neighbors(
-    evidence,
+    teacher,
     config: dict,
     device: torch.device,
     descriptor_override: np.ndarray | None = None,
@@ -319,13 +330,13 @@ def sampling_neighbors(
     geographic_pool_k = int(sampling["geographic_positive_pool_k"])
     hard_k = int(sampling["hard_descriptor_k"])
     geographic_pool = COMMON.geographic_topk(
-        evidence.train_coordinates, geographic_pool_k, device
+        teacher.train_coordinates, geographic_pool_k, device
     )
     geographic_pool_distance = COMMON.row_candidate_distances(
-        evidence.train_coordinates,
-        evidence.train_coordinates[geographic_pool],
+        teacher.train_coordinates,
+        teacher.train_coordinates[geographic_pool],
     )
-    raw_teacher = COMMON.normalize_rows(evidence.train_descriptors["fused"])
+    raw_teacher = COMMON.normalize_rows(teacher.train_descriptors["fused"])
     geographic_pool_similarity = np.sum(
         raw_teacher[:, None, :] * raw_teacher[geographic_pool], axis=2
     )
@@ -346,14 +357,14 @@ def sampling_neighbors(
             geographic_pool[row, similarity_order[:geographic_k]]
         )
     geographic = np.asarray(selected_geographic, dtype=np.int64)
-    self_indices = np.arange(len(evidence.train_filename), dtype=np.int64)
+    self_indices = np.arange(len(teacher.train_filename), dtype=np.int64)
     mining_descriptors = (
-        evidence.train_descriptors["fused"]
+        teacher.train_descriptors["fused"]
         if descriptor_override is None
         else np.asarray(descriptor_override, dtype=np.float32)
     )
-    if mining_descriptors.shape[0] != len(evidence.train_filename):
-        raise ValueError("Mining descriptor rows differ from training evidence")
+    if mining_descriptors.shape[0] != len(teacher.train_filename):
+        raise ValueError("Mining descriptor rows differ from the teacher cache")
     hard, _ = COMMON.matrix_topk(
         mining_descriptors,
         mining_descriptors,
@@ -362,10 +373,10 @@ def sampling_neighbors(
         self_indices=self_indices,
     )
     geographic_distance = COMMON.row_candidate_distances(
-        evidence.train_coordinates, evidence.train_coordinates[geographic]
+        teacher.train_coordinates, teacher.train_coordinates[geographic]
     )
     hard_distance = COMMON.row_candidate_distances(
-        evidence.train_coordinates, evidence.train_coordinates[hard]
+        teacher.train_coordinates, teacher.train_coordinates[hard]
     )
     threshold = float(sampling["hard_negative_minimum_km"])
     hard_rows = []
@@ -630,7 +641,7 @@ def evaluate_retrieval(
     model,
     bank_loader,
     validation_loader,
-    evidence,
+    teacher,
     device: torch.device,
     validation_batches_limit: int | None,
     local_rerank_weight: float,
@@ -643,9 +654,9 @@ def evaluate_retrieval(
         device,
         maximum_batches=validation_batches_limit,
     )
-    if not np.array_equal(bank["filename"].astype(str), evidence.train_filename):
-        raise RuntimeError("Deterministic bank order differs from cached evidence")
-    expected_validation_names = evidence.val_filename[: len(validation["filename"])]
+    if not np.array_equal(bank["filename"].astype(str), teacher.train_filename):
+        raise RuntimeError("Deterministic bank order differs from the teacher cache")
+    expected_validation_names = teacher.val_filename[: len(validation["filename"])]
     if not np.array_equal(
         validation["filename"].astype(str), expected_validation_names
     ):
@@ -683,8 +694,8 @@ def evaluate_retrieval(
     train_distance = COMMON.row_candidate_distances(
         bank["coordinates"], bank["coordinates"][train_indices]
     )[:, 0]
-    teacher = COMMON.normalize_rows(evidence.train_descriptors["fused"])
-    teacher_alignment = np.sum(bank["descriptor"] * teacher, axis=1)
+    reference = COMMON.normalize_rows(teacher.train_descriptors["fused"])
+    teacher_alignment = np.sum(bank["descriptor"] * reference, axis=1)
     metrics = {
         "retrieval_top1": {
             **retrieval_metric_summary(top1_distance),
@@ -1096,6 +1107,14 @@ def main() -> int:
     args = parse_args()
     if args.self_test:
         return self_test()
+    if not args.config.is_file():
+        raise SystemExit(
+            f"{args.config} is not in this repository: it configured the locked "
+            "retrieval baseline, which the submitted pipeline replaced. Train "
+            "with src/full_data_finetune.py (submitted model) or "
+            "src/country_aware_retrieval_finetune.py (cross-validation); use "
+            "--self-test to exercise this module."
+        )
     if not torch.cuda.is_available() or not torch.cuda.is_bf16_supported():
         raise RuntimeError("CUDA BF16 is required")
     for value, name in (
@@ -1129,12 +1148,14 @@ def main() -> int:
     output.mkdir(parents=True, exist_ok=True)
 
     device = torch.device("cuda")
-    evidence = COMMON.load_fold_evidence(args.evidence.resolve(), fold)
+    teacher = COMMON.load_fold_teacher(
+        fold, args.teacher_cache.resolve(), config["sampling"]
+    )
     source = torch.load(source_path, map_location="cpu", weights_only=False)
-    validate_source(source, source_path, evidence, config, fold)
-    evidence_path = args.evidence.resolve() / f"fold_{fold}.npz"
+    validate_source(source, source_path, teacher, config, fold)
+    teacher_cache_path = args.teacher_cache.resolve() / f"fold_{fold}.npz"
     fingerprint = build_retrieval_fingerprint(
-        fold, config_path, source_path, evidence_path
+        fold, config_path, source_path, teacher_cache_path
     )
     seed = int(config["seed"]) + fold * 10_000
     set_seed(seed)
@@ -1150,10 +1171,10 @@ def main() -> int:
     )
     if not np.array_equal(
         train_dataset.rows["filename"].astype(str).to_numpy(),
-        evidence.train_filename,
+        teacher.train_filename,
     ):
-        raise RuntimeError("Training dataset order differs from evidence")
-    geographic, hard, sampling_report = sampling_neighbors(evidence, config, device)
+        raise RuntimeError("Training dataset order differs from the teacher cache")
+    geographic, hard, sampling_report = sampling_neighbors(teacher, config, device)
     print(json.dumps({"sampling": sampling_report}, indent=2), flush=True)
 
     local_features = int(config.get("model", {}).get("local_feature_dimension", 64))
@@ -1205,9 +1226,9 @@ def main() -> int:
         int(config["batch"]["workers"]),
     )
     filename_to_position = {
-        value: index for index, value in enumerate(evidence.train_filename)
+        value: index for index, value in enumerate(teacher.train_filename)
     }
-    cached_teacher = evidence.train_descriptors["fused"].astype(np.float32)
+    cached_teacher = teacher.train_descriptors["fused"].astype(np.float32)
 
     start_epoch = 1
     global_step = 0
@@ -1216,7 +1237,7 @@ def main() -> int:
             ema.model,
             bank_loader,
             validation_loader,
-            evidence,
+            teacher,
             device,
             args.validation_batches_limit,
             float(config["evaluation"]["local_rerank_weight"]),
@@ -1255,7 +1276,7 @@ def main() -> int:
                 ema.model, bank_loader, device, maximum_batches=None
             )
             geographic, hard, epoch_sampling = sampling_neighbors(
-                evidence,
+                teacher,
                 config,
                 device,
                 descriptor_override=mining_bank["descriptor"],
@@ -1299,7 +1320,7 @@ def main() -> int:
             ema.model,
             bank_loader,
             validation_loader,
-            evidence,
+            teacher,
             device,
             args.validation_batches_limit,
             float(config["evaluation"]["local_rerank_weight"]),

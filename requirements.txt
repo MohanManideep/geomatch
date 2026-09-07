@@ -1,5 +1,15 @@
-numpy>=1.26,<3
-pandas>=2.1,<3
-Pillow>=10
-torch>=2.2
-torchvision>=0.17
+# Exact versions of the environment that trained the submitted model and wrote
+# predictions.csv. Python 3.12.3, CUDA 13.0 (driver 580.159.03), one NVIDIA RTX
+# 4000 Ada Generation (20 GB, compute capability 8.9). Training and inference
+# both require a bfloat16-capable CUDA GPU.
+#
+# The torch/torchvision wheels are the CUDA 13.0 builds:
+#   pip install torch==2.12.1 torchvision==0.27.1 \
+#       --index-url https://download.pytorch.org/whl/cu130
+#   pip install -r requirements.txt
+numpy==2.5.2
+pandas==3.0.5
+Pillow==12.3.0
+torch==2.12.1
+torchvision==0.27.1
+matplotlib==3.11.1

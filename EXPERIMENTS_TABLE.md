@@ -157,10 +157,13 @@ fixed epoch count, no checkpoint selection on the eval fold) unless noted.
 ### 13. Final decision: one model, the shipped recipe
 - **Experiment:** compare independently-seeded single-model runs on their own,
   un-ensembled, pooled OOF score.
-- **Result:** three seeds of the **exact shipped config** give 55.60 / 57.12 /
-  57.71 km -> mean **56.8 +/- 1.1**, median 57.12, best observed 55.60. Three
-  further runs of *earlier* configs in the same family (22-epoch, and two
-  variants) give 57.66 / 59.17 / 55.84, so the whole family spans 55.6-59.2 km.
+- **Result:** three seeds of the **exact shipped config** (`--seed-base`
+  220517 / 331901 / 447803) give 55.60 / 57.12 / 57.71 km -> mean
+  **56.8 +/- 1.1**, median 57.12, best observed 55.60. Three further runs of
+  *earlier* configs in the same family (seeds 933071, 700123, 811777: the
+  22-epoch recipe and two 34-epoch variants) give 55.84 / 57.66 / 59.17, so the
+  whole family spans 55.6-59.2 km. The submitted all-data model uses seed
+  940111, the config default, which was never scored on cross-validation.
   Quoting 55.60 alone would be cherry-picking the best of three; the mean is
   the honest headline. Seed-to-seed spread (~1.1 km) is larger than the
   difference between the 22- and 40-epoch recipes, so the extra epochs are not

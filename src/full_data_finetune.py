@@ -6,8 +6,8 @@ Differences from the cross-validation driver (``country_aware_retrieval_finetune
 * the training set is every labelled image, so there is no validation fold and
   no per-epoch retrieval evaluation -- the run is a fixed 40-epoch schedule;
 * the trunk is initialised from an existing BYOL backbone (unsupervised, no
-  labels), and the frozen teacher descriptors for the listwise distillation
-  term are the per-fold encoder cache concatenated to cover all images.
+  labels), and the frozen listwise distillation targets come from
+  ``artifacts/teacher_cache`` (see ``src/build_teacher_cache.py``).
 
 Objective, sampler, hard-negative mining, anchor oversampling and the optimiser
 schedule are imported unchanged from the cross-validation driver.
@@ -46,11 +46,10 @@ TRAINER = cv.TRAINER
 COMMON = cv.COMMON
 
 DEFAULT_IMAGES = Path("/var/tmp/luli38se-geomatch/data/geo_dataset/train")
-DEFAULT_EVIDENCE = Path(
-    "/var/tmp/luli38se-geomatch/outputs/regnet_cp_v2_failure_audit/evidence/fold_0.npz"
-)
+DEFAULT_TEACHER_CACHE = ROOT / "artifacts/teacher_cache"
+TEACHER_CACHE_FOLD = 0
 DEFAULT_BACKBONE = Path(
-    "/var/tmp/luli38se-geomatch/outputs/regnet_cp_ssl_backbone_full/fold_2/backbone.pt"
+    "/var/tmp/luli38se-geomatch/outputs/ssl_backbone/fold_2/backbone.pt"
 )
 DEFAULT_OUTPUT = Path("/var/tmp/luli38se-geomatch/outputs/regnet_cp_full_data")
 DEFAULT_NORMALIZATION = ROOT / "artifacts/normalization/fold_0.json"
@@ -74,23 +73,22 @@ def load_all_rows() -> pd.DataFrame:
     return rows
 
 
-def load_teacher_descriptors(evidence_path: Path, rows: pd.DataFrame) -> np.ndarray:
-    """Frozen fused encoder descriptors for every image, in ``rows`` order."""
-    with np.load(evidence_path, allow_pickle=False) as source:
-        names = np.concatenate(
-            [source["train_filename"].astype(str), source["val_filename"].astype(str)]
-        )
-        fused = np.concatenate(
-            [
-                source["train_descriptor_fused"].astype(np.float32),
-                source["val_descriptor_fused"].astype(np.float32),
-            ]
-        )
-    lookup = {name: i for i, name in enumerate(names)}
-    missing = [n for n in rows["filename"] if n not in lookup]
+def load_teacher_descriptors(cache: Path, rows: pd.DataFrame) -> np.ndarray:
+    """Frozen fused teacher descriptors for every image, in ``rows`` order.
+
+    Any one fold's cache covers all 11,758 images -- its training and
+    validation halves partition the dataset -- so fold 0's is enough here.
+    """
+    teacher = COMMON.load_fold_teacher(TEACHER_CACHE_FOLD, cache)
+    names = np.concatenate([teacher.train_filename, teacher.val_filename])
+    fused = np.concatenate(
+        [teacher.train_descriptors["fused"], teacher.val_descriptors["fused"]]
+    )
+    lookup = {name: index for index, name in enumerate(names)}
+    missing = [name for name in rows["filename"] if name not in lookup]
     if missing:
         raise RuntimeError(f"teacher descriptors missing {len(missing)} images")
-    order = np.array([lookup[n] for n in rows["filename"]], dtype=np.int64)
+    order = np.array([lookup[name] for name in rows["filename"]], dtype=np.int64)
     return fused[order]
 
 
@@ -143,7 +141,7 @@ def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--config", type=Path, default=cv.DEFAULT_CONFIG)
     parser.add_argument("--images", type=Path, default=DEFAULT_IMAGES)
-    parser.add_argument("--evidence", type=Path, default=DEFAULT_EVIDENCE)
+    parser.add_argument("--teacher-cache", type=Path, default=DEFAULT_TEACHER_CACHE)
     parser.add_argument("--backbone", type=Path, default=DEFAULT_BACKBONE)
     parser.add_argument("--output", type=Path, default=DEFAULT_OUTPUT)
     parser.add_argument("--resume", action="store_true")
@@ -167,7 +165,9 @@ def main() -> int:
     filenames = rows["filename"].astype(str).to_numpy()
     coordinates = rows[["lat", "lng"]].to_numpy(dtype=np.float64)
     countries = rows["country_index"].to_numpy(dtype=np.int64)
-    cached_teacher = load_teacher_descriptors(args.evidence, rows).astype(np.float32)
+    cached_teacher = load_teacher_descriptors(args.teacher_cache, rows).astype(
+        np.float32
+    )
     filename_to_position = {name: i for i, name in enumerate(filenames)}
 
     train_dataset, bank_dataset = build_datasets(rows, args.images.resolve())
@@ -206,13 +206,13 @@ def main() -> int:
         bank_dataset, int(config["batch"]["validation_batch"]), workers
     )
 
-    sampler_evidence = SimpleNamespace(
+    sampler_teacher = SimpleNamespace(
         train_filename=filenames,
         train_coordinates=coordinates,
         train_country=countries,
         train_descriptors={"fused": cached_teacher},
     )
-    geographic = cv.geographic_positive_neighbours(sampler_evidence, config, device)
+    geographic = cv.geographic_positive_neighbours(sampler_teacher, config, device)
     row_weights = cv.anchor_row_weights(countries, config)
 
     resume_epoch = 0

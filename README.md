@@ -107,67 +107,149 @@ German median, so the shortfall is not that no usable neighbour exists.
 ## Layout
 
 ```
-configs/            final_recipe.json (training recipe), data.json (view + augmentation spec)
-src/                model, data pipeline, objectives, and the two training entry points
-splits/             folds_seed42.csv (the 5-fold split we generated, seed 42)
-artifacts/          per-fold normalization stats and geo-cell assignments read by the pipeline
-images/             figure-generation script and the figures used in the write-up
-EXPERIMENT_LOG.md   narrative record of what was tried and why
-EXPERIMENTS_TABLE.md the same history as a compact experiment/result/issue table
+configs/                  final_recipe.json (training recipe), data.json (view + augmentation spec)
+src/                      model, data pipeline, objectives, and the training/inference entry points
+splits/                   folds_seed42.csv (the 5-fold split we generated, seed 42)
+artifacts/fold_assignments/  per-fold train/validation rows and geo-cell labels
+artifacts/normalization/  per-fold channel mean/std, fit on that fold's training images only
+artifacts/teacher_cache/  frozen distillation targets the objective needs (see below)
+model/model_final.pt      the submitted model (EMA weights, 4,869,911 parameters)
+predictions.csv           holdout predictions from that checkpoint
+images/                   figure-generation script and the figures used in the write-up
+EXPERIMENT_LOG.md         narrative record of what was tried and why
+EXPERIMENTS_TABLE.md      the same history as a compact experiment/result/issue table
 ```
+
+### The teacher cache
+
+The retrieval objective distils toward a set of frozen descriptors. They set
+the soft listwise targets for the global and local listwise terms, and they
+order the geographic-positive pool — so they shape training regardless of
+`descriptor_preservation_weight`, which the shipped recipe sets to `0.0`
+(that switches off only the extra cosine preservation term). Those descriptors
+come from two earlier encoders that are *not* part of the submitted model:
+
+| what | source | used for |
+|---|---|---|
+| fused 384-D descriptors | joint geo-cell classification model, epoch 9 of each fold | listwise distillation targets; ordering the geographic-positive pool |
+| epoch-0 hard-negative ranking | locked retrieval baseline, epoch 6 of each fold | the first epoch's hard negatives only — every later epoch re-mines from the run's own EMA |
+
+`artifacts/teacher_cache/fold_*.npz` (~24 MB each) holds exactly what training
+reads, so a clean checkout trains without any external artifact. Each file has
+a `fold_*.json` manifest recording its SHA-256, the source checkpoint paths and
+their SHA-256s, and the sampling bands the cached epoch-0 rows were resolved
+under; the loader refuses a cache whose hash or sampling bands disagree.
+
+```bash
+# check the committed cache (no GPU, no other artifacts needed)
+python src/build_teacher_cache.py --verify
+
+# rebuild it, if you have the two source caches
+python src/build_teacher_cache.py --folds 0 1 2 3 4 \
+    --descriptor-source <dir> --mining-source <dir>
+```
+
+The two source encoders' checkpoints are training outputs of abandoned
+architectures and are not in this repository, so the committed cache is where
+reproducibility bottoms out. Its descriptors are byte-identical to the ones the
+reported runs used, and the cached epoch-0 hard-negative rows reproduce the
+recorded epoch-1 mining report of the 55.60 km run exactly.
 
 ## Setup
 
 ```bash
 python -m venv venv
 source venv/bin/activate
+pip install torch==2.12.1 torchvision==0.27.1 \
+    --index-url https://download.pytorch.org/whl/cu130
 pip install -r requirements.txt
 ```
 
-Requires a CUDA GPU with bfloat16 support for training. Image data is expected at
-`/var/tmp/luli38se-geomatch/data/geo_dataset/train`; override with `--images
-<path>` on either training script.
+Trained and evaluated on Python 3.12.3, CUDA 13.0 (driver 580.159.03), one
+NVIDIA RTX 4000 Ada Generation (20 GB, compute capability 8.9). Training and
+inference both require a bfloat16-capable CUDA GPU; `requirements.txt` pins the
+exact package versions used.
+
+Image data is expected at `/var/tmp/luli38se-geomatch/data/geo_dataset`, with
+`train/` and `holdout_public/` beneath it. Override with `--images <path>` on
+either training script, or `--data-root <path>` on `predict_holdout.py`.
 
 ## Run
+
+### Reproduce the submitted predictions
+
+Everything needed is in this repository:
+
+```bash
+python src/predict_holdout.py \
+    --model model/model_final.pt \
+    --data-root /path/to/geo_dataset \
+    --output predictions_recheck.csv
+```
+
+This encodes all 11,758 training images as the bank plus the 2,400 holdout
+images, runs the top-200 shortlist and late-interaction rerank, and writes
+`filename,pred_lat,pred_lng`. It takes about five minutes and should match the
+committed `predictions.csv` row for row.
+
+### Retrain the submitted model (all 11,758 images, no held-out fold)
+
+```bash
+# 1. BYOL backbone (labels unused). The submitted model started from fold 2.
+python src/ssl_pretrain_backbone.py --fold 2
+
+# 2. 40-epoch retrieval finetune on every labelled image (resume-safe)
+python src/full_data_finetune.py --resume
+```
+
+`ssl_pretrain_backbone.py` writes `<outputs>/ssl_backbone/fold_<k>/backbone.pt`,
+which is where `full_data_finetune.py` and `configs/final_recipe.json` look for
+it. The submitted checkpoint records its backbone under that directory's former
+name, `regnet_cp_ssl_backbone_full`; the file is unchanged and its SHA-256
+(`1594c81a…`) still matches.
 
 ### Cross-validation (produces the reported 5-fold OOF numbers)
 
 ```bash
-# 1. SSL backbone, one per fold
 for f in 0 1 2 3 4; do
   python src/ssl_pretrain_backbone.py --fold $f
 done
 
-# 2. retrieval fine-tune across all folds
 python src/country_aware_retrieval_finetune.py \
-    --config configs/final_recipe.json --folds 0 1 2 3 4
+    --config configs/final_recipe.json --folds 0 1 2 3 4 --seed-base 220517
 ```
 
-### Submitted model (all 11,758 images, no held-out fold)
+The reported single-model numbers are three runs of this exact command that
+differ only in `--seed-base`:
+
+| `--seed-base` | pooled OOF median | mean | within 50 km |
+|---|---:|---:|---:|
+| 220517 | 55.60 km | 468.6 km | 49.1% |
+| 331901 | 57.12 km | 471.1 km | 48.8% |
+| 447803 | 57.71 km | 468.2 km | 48.6% |
+
+which is the 56.8 ± 1.1 km headline. Two other seeds appear in the history:
+933071 is the earlier 22-epoch run (57.95 km), and 940111 is
+`configs/final_recipe.json`'s own default — the seed the submitted all-data
+model used, and one that was never scored on cross-validation.
+
+Each fold's per-epoch checkpoint carries model, EMA **and** AdamW state, so
+`--resume` continues the same trajectory rather than restarting the optimiser's
+moments. Checkpoints written before that was true are rejected on resume rather
+than silently continued.
+
+### Figures
 
 ```bash
-# retrain the recipe on every labelled image (resume-safe)
-python src/full_data_finetune.py --resume
-
-# generate predictions.csv for the public holdout set
-python src/predict_holdout.py
-```
-
-`full_data_finetune.py` initialises the trunk from one of the BYOL backbones
-above and finetunes for 40 epochs on all labelled data; `predict_holdout.py`
-runs the top-200 shortlist + late-interaction rerank and writes
-`predictions.csv` (`filename,pred_lat,pred_lng`, 2400 rows).
-
-```bash
-# regenerate report figures from saved predictions
 python images/make_figures.py
 ```
 
-Note: `make_figures.py` reads cached out-of-fold predictions and descriptor
-caches under `/var/tmp/luli38se-geomatch/outputs/`, which are training outputs
-and are **not** checked into this repository. The committed figures cannot be
-reproduced from a clean clone without first re-running the cross-validation
-above. `images/geomatch.png` is drawn by hand, not generated.
+The figure script reads out-of-fold predictions and descriptor caches under
+`/var/tmp/luli38se-geomatch/outputs/`. Those are cross-validation outputs, not
+repository files, so a clean checkout cannot redraw the figures until the
+cross-validation above has been run; the script lists every path it needs and
+which run produces it before doing any work. `images/geomatch.png` is drawn by
+hand, not generated.
 
 ## Formatting
 

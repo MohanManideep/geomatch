@@ -136,18 +136,25 @@ project's final result. (This mirrors a note already left in
 ## 6. Final decision
 
 The single-model pooled OOF scores across six independently seeded runs of
-the SSL + country-aware-finetune recipe:
+the SSL + country-aware-finetune recipe. The three shipped-config runs come
+from one command differing only in `--seed-base`:
 
-| run / seed | pooled OOF median |
-|---|---:|
-| seed A | 57.66 km |
-| seed B | 59.17 km |
-| seed C | 55.84 km |
-| **seed D** | **55.60 km** |
-| seed E | 57.12 km |
-| seed F | 57.71 km |
+```bash
+python src/country_aware_retrieval_finetune.py \
+    --config configs/final_recipe.json --folds 0 1 2 3 4 --seed-base <seed>
+```
 
-All cluster in the 55.6-59.2 km band -- i.e. this is the honest, reproducible
+| seed | config | pooled OOF median |
+|---|---|---:|
+| 700123 | 34-epoch predecessor | 57.66 km |
+| 811777 | 34-epoch predecessor | 59.17 km |
+| 933071 | 22-epoch predecessor | 55.84 km |
+| **220517** | **shipped, 40 ep** | **55.60 km** |
+| 331901 | shipped, 40 ep | 57.12 km |
+| 447803 | shipped, 40 ep | 57.71 km |
+
+(The submitted all-data model uses seed 940111, the config default, which is
+not among these six.) All cluster in the 55.6-59.2 km band -- i.e. this is the honest, reproducible
 performance envelope of one <=5M-parameter, from-scratch, SSL+retrieval model
 on this data, independent of random seed. **The best-performing recipe**
 (`configs/final_recipe.json`: grid-4 local tokens, 40-epoch finetune, tightened

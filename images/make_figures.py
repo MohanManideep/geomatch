@@ -367,7 +367,47 @@ def fig_examples(final: pd.DataFrame) -> None:
     print("wrote examples.png")
 
 
+REQUIRED_INPUTS = {
+    "baseline OOF predictions (retrieval baseline, 89.2 km)": [
+        OUT / "regnet_cp_v6_locked_oof/pooled_oof_predictions.csv"
+    ],
+    "shipped-recipe OOF predictions (seed 220517, 55.60 km)": [
+        OUT / f"regnet_cp_v13_s1/fold_{fold}/predictions_epoch_040.csv"
+        for fold in range(5)
+    ],
+    "shipped-recipe descriptor caches (seed 220517)": [
+        OUT / f"regnet_cp_v13_feat_s1/fold_{fold}.npz" for fold in range(5)
+    ],
+    "training curves (seed 220517 and the 8x8-token variant, seed 900001)": [
+        OUT / "regnet_cp_v13_s1/fold_0/metrics.jsonl",
+        OUT / "regnet_cp_v12_s1/fold_0/metrics.jsonl",
+    ],
+    "training images": [TRAIN_IMAGES],
+}
+
+
+def check_inputs() -> None:
+    """These are cross-validation outputs, not repository files. A clean
+    checkout has none of them; see the figure section of the README for which
+    run produces each one."""
+    missing = [
+        f"  {path}   ({role})"
+        for role, paths in REQUIRED_INPUTS.items()
+        for path in paths
+        if not path.exists()
+    ]
+    if missing:
+        raise SystemExit(
+            "Cannot draw the figures: these inputs are missing.\n"
+            + "\n".join(missing)
+            + "\n\nThey are produced by the cross-validation runs in the README; "
+            "the committed figures under images/figures/ are the output of that "
+            "same script on a machine that had them."
+        )
+
+
 def main() -> int:
+    check_inputs()
     baseline = load_baseline()
     final = load_final()
     fig_per_country(baseline, final)

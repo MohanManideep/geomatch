@@ -10,21 +10,25 @@ oracle@50) the retrieved same-country images are scattered, not near the
 query. That is a representation problem, so this experiment changes the
 encoder itself instead.
 
-It starts from a pretrained encoder's EMA weights and continues training with
-two changes:
+It starts from a pretrained trunk and trains with two changes against that
+baseline:
 
-1. the fourth row of every sampled group is a **same-country, visually similar,
-   120--900 km** hard negative (mined from the current EMA each epoch), instead
-   of a mostly cross-country ">=200 km" negative -- forcing within-country
-   spatial discrimination;
-2. anchors from the weakest countries are oversampled.
+1. the fourth row of every sampled group is a same-country, visually similar
+   hard negative in the ``hard_negative_minimum_km``--``hard_negative_maximum_km``
+   band (60--700 km in the shipped recipe), re-mined from the current EMA every
+   epoch, instead of a mostly cross-country ">=200 km" negative -- forcing
+   within-country spatial discrimination;
+2. anchors from the weakest countries are oversampled
+   (``failing_country_anchor_weight``).
 
-Preservation toward the raw descriptor is halved and the backbone learning rate
-is raised so the representation can actually move.  Everything else -- the
-objective, the parameter count (4,869,911), the strict per-fold contract, the
-fixed-epoch no-selection policy -- is unchanged.
+Everything else -- the objective, the parameter count (4,869,911), the strict
+per-fold contract, the fixed-epoch no-selection policy -- is unchanged. The
+shipped recipe starts from a BYOL backbone and sets
+``descriptor_preservation_weight`` to 0, so the frozen teacher descriptors in
+``artifacts/teacher_cache`` act only through the listwise distillation targets
+and the ordering of the geographic-positive pool.
 
-Fold 0 is the pilot.  It advances to folds 1--4 only if its fixed-epoch
+Fold 0 runs first as a pilot: it advances to folds 1--4 only if its fixed-epoch
 validation median beats ``checkpoint.pilot_advance_fold0_median_km``.
 """
 
@@ -63,9 +67,7 @@ ROOT = Path(__file__).resolve().parents[1]
 TRAINER_PATH = ROOT / "src/spatial_retrieval_finetune.py"
 DEFAULT_CONFIG = ROOT / "configs/final_recipe.json"
 DEFAULT_IMAGES = Path("/var/tmp/luli38se-geomatch/data/geo_dataset/train")
-DEFAULT_EVIDENCE = Path(
-    "/var/tmp/luli38se-geomatch/outputs/regnet_cp_v2_failure_audit/evidence"
-)
+DEFAULT_TEACHER_CACHE = ROOT / "artifacts/teacher_cache"
 OUTPUT_ROOT = Path("/var/tmp/luli38se-geomatch/outputs")
 LOCKED_BASELINE_ROOT = OUTPUT_ROOT / "regnet_cp_v6_locked_oof"
 DEFAULT_OUTPUT = OUTPUT_ROOT / "regnet_cp_v8_country_aware"
@@ -219,34 +221,41 @@ class WeightedSpatialHardBatchSampler(TRAINER.SpatialHardBatchSampler):
             yield batch
 
 
-def load_fold_cache_descriptor(fold: int, filenames: np.ndarray) -> np.ndarray:
-    path = OUTPUT_ROOT / "regnet_cp_v6_retrieval_features" / f"fold_{fold}.npz"
-    if not path.is_file():
-        raise FileNotFoundError(
-            f"Missing baseline feature cache for fold {fold} at {path}"
-        )
-    with np.load(path, allow_pickle=False) as source:
-        cache_names = source["train_filename"].astype(str)
-        descriptor = source["train_descriptor"].astype(np.float32)
-    if not np.array_equal(cache_names, filenames):
-        raise RuntimeError(
-            "Baseline feature cache training order differs from fold evidence"
-        )
-    return descriptor
+def cached_hard_negative_report(teacher, config: dict) -> dict:
+    """Restate ``mine_regional_hard_negatives``'s report for the epoch-0 rows
+    that ``artifacts/teacher_cache`` supplies pre-resolved."""
+    sampling = config["sampling"]
+    lengths = [len(row) for row in teacher.epoch0_hard_rows]
+    branch = teacher.epoch0_hard_branch
+    return {
+        "rows": len(lengths),
+        "hard_descriptor_k": int(sampling["hard_descriptor_k"]),
+        "same_country_only": bool(sampling["hard_negative_same_country"]),
+        "distance_band_km": [
+            float(sampling["hard_negative_minimum_km"]),
+            float(sampling["hard_negative_maximum_km"]),
+        ],
+        "rows_with_same_country_regional_negative": int(np.sum(branch == 0)),
+        "rows_using_cross_country_fallback": int(np.sum(branch == 1)),
+        "rows_using_farthest_fallback": int(np.sum(branch == 2)),
+        "mean_candidates_per_row": float(np.mean(lengths)),
+        "min_candidates_per_row": int(min(lengths)),
+        "source": "teacher_cache",
+    }
 
 
 def geographic_positive_neighbours(
-    evidence, config: dict, device: torch.device
+    teacher, config: dict, device: torch.device
 ) -> np.ndarray:
     sampling = config["sampling"]
     k = int(sampling["geographic_positive_k"])
     pool_k = int(sampling["geographic_positive_pool_k"])
-    pool = COMMON.geographic_topk(evidence.train_coordinates, pool_k, device)
+    pool = COMMON.geographic_topk(teacher.train_coordinates, pool_k, device)
     pool_distance = COMMON.row_candidate_distances(
-        evidence.train_coordinates, evidence.train_coordinates[pool]
+        teacher.train_coordinates, teacher.train_coordinates[pool]
     )
-    teacher = COMMON.normalize_rows(evidence.train_descriptors["fused"])
-    pool_similarity = np.sum(teacher[:, None, :] * teacher[pool], axis=2)
+    descriptors = COMMON.normalize_rows(teacher.train_descriptors["fused"])
+    pool_similarity = np.sum(descriptors[:, None, :] * descriptors[pool], axis=2)
     maximum_km = float(sampling["geographic_positive_maximum_km"])
     selected = []
     for row in range(len(pool)):
@@ -440,7 +449,9 @@ def run_fold(fold: int, config: dict, args, device: torch.device) -> dict:
     set_seed(seed)
     torch.backends.cudnn.benchmark = True
 
-    evidence = COMMON.load_fold_evidence(args.evidence.resolve(), fold)
+    teacher = COMMON.load_fold_teacher(
+        fold, args.teacher_cache.resolve(), config["sampling"]
+    )
     normalization_path = ROOT / f"artifacts/normalization/fold_{fold}.json"
     train_dataset, _ = TRAINER.build_fold_datasets(
         fold, args.images.resolve(), normalization_path
@@ -458,9 +469,9 @@ def run_fold(fold: int, config: dict, args, device: torch.device) -> dict:
         fold, args.images.resolve()
     )
     if not np.array_equal(
-        train_dataset.rows["filename"].astype(str).to_numpy(), evidence.train_filename
+        train_dataset.rows["filename"].astype(str).to_numpy(), teacher.train_filename
     ):
-        raise RuntimeError("Training dataset order differs from evidence")
+        raise RuntimeError("Training dataset order differs from the teacher cache")
 
     model, start_provenance = load_start_model(fold, config, device)
     ema = ModelEMA(model, decay=float(config["ema"]["decay"]))
@@ -501,10 +512,10 @@ def run_fold(fold: int, config: dict, args, device: torch.device) -> dict:
     validation_loader = TRAINER.deterministic_loader(
         validation_dataset, int(config["batch"]["validation_batch"]), workers
     )
-    filename_to_position = {v: i for i, v in enumerate(evidence.train_filename)}
-    cached_teacher = evidence.train_descriptors["fused"].astype(np.float32)
-    geographic = geographic_positive_neighbours(evidence, config, device)
-    row_weights = anchor_row_weights(evidence.train_country, config)
+    filename_to_position = {v: i for i, v in enumerate(teacher.train_filename)}
+    cached_teacher = teacher.train_descriptors["fused"].astype(np.float32)
+    geographic = geographic_positive_neighbours(teacher, config, device)
+    row_weights = anchor_row_weights(teacher.train_country, config)
     rerank_weight = float(config["evaluation"]["local_rerank_weight"])
     top_k = int(config["evaluation"]["shortlist_top_k"])
 
@@ -519,7 +530,7 @@ def run_fold(fold: int, config: dict, args, device: torch.device) -> dict:
             tag_model,
             bank_loader,
             validation_loader,
-            evidence,
+            teacher,
             device,
             val_limit,
             rerank_weight,
@@ -533,14 +544,24 @@ def run_fold(fold: int, config: dict, args, device: torch.device) -> dict:
         prior = sorted(output.glob("epoch_*.pt"))
         if prior:
             ck = torch.load(prior[-1], map_location="cpu", weights_only=False)
+            if "optimizer" not in ck:
+                raise RuntimeError(
+                    f"{prior[-1].name} predates optimizer-state checkpointing; "
+                    "resuming from it would restart AdamW's moments and change "
+                    "the trajectory. Rerun the fold from scratch."
+                )
             model.load_state_dict(ck["model"])
             ema.load_state_dict(ck["ema"])
+            optimizer.load_state_dict(ck["optimizer"])
             resume_epoch = int(ck["epoch"])
             print(
                 f"[fold {fold}] RESUME at epoch {resume_epoch} from {prior[-1].name}",
                 flush=True,
             )
 
+    # Epoch 1 mines its hard negatives from the frozen baseline ranking held in
+    # the teacher cache; every later epoch re-mines from the current EMA.
+    pending_hard_rows = None
     if resume_epoch > 0:
         lines = [
             l for l in (output / "metrics.jsonl").read_text().splitlines() if l.strip()
@@ -563,17 +584,25 @@ def run_fold(fold: int, config: dict, args, device: torch.device) -> dict:
             ),
             flush=True,
         )
-        mining_descriptor = load_fold_cache_descriptor(fold, evidence.train_filename)
+        mining_descriptor = None
+        pending_hard_rows = (
+            teacher.epoch0_hard_rows,
+            cached_hard_negative_report(teacher, config),
+        )
 
     global_step = resume_epoch * steps_per_epoch
     for epoch in range(resume_epoch + 1, stop_after + 1):
-        hard_rows, mining_report = mine_regional_hard_negatives(
-            mining_descriptor,
-            evidence.train_coordinates,
-            evidence.train_country,
-            config,
-            device,
-        )
+        if pending_hard_rows is not None:
+            hard_rows, mining_report = pending_hard_rows
+            pending_hard_rows = None
+        else:
+            hard_rows, mining_report = mine_regional_hard_negatives(
+                mining_descriptor,
+                teacher.train_coordinates,
+                teacher.train_country,
+                config,
+                device,
+            )
         atomic_json(
             output / f"hard_negative_report_epoch_{epoch:03d}.json", mining_report
         )
@@ -634,6 +663,7 @@ def run_fold(fold: int, config: dict, args, device: torch.device) -> dict:
                 "global_step": global_step,
                 "model": model.state_dict(),
                 "ema": ema.state_dict(),
+                "optimizer": optimizer.state_dict(),
                 "config": config,
                 "start_provenance": start_provenance,
             },
@@ -649,9 +679,11 @@ def run_fold(fold: int, config: dict, args, device: torch.device) -> dict:
                 ema.model, bank_loader, device, maximum_batches=None
             )
             if not np.array_equal(
-                encoded["filename"].astype(str), evidence.train_filename
+                encoded["filename"].astype(str), teacher.train_filename
             ):
-                raise RuntimeError("EMA bank encode order differs from evidence")
+                raise RuntimeError(
+                    "EMA bank encode order differs from the teacher cache"
+                )
             mining_descriptor = encoded["descriptor"].astype(np.float32)
 
     final_metrics = history[-1]["validation"]["retrieval_top1"]
@@ -674,7 +706,7 @@ def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--config", type=Path, default=DEFAULT_CONFIG)
     parser.add_argument("--images", type=Path, default=DEFAULT_IMAGES)
-    parser.add_argument("--evidence", type=Path, default=DEFAULT_EVIDENCE)
+    parser.add_argument("--teacher-cache", type=Path, default=DEFAULT_TEACHER_CACHE)
     parser.add_argument("--output", type=Path, default=DEFAULT_OUTPUT)
     parser.add_argument("--folds", type=int, nargs="+", default=None)
     parser.add_argument("--stop-after-epoch", type=int)

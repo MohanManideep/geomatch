@@ -1,6 +1,6 @@
-"""Shared retrieval utilities: fold evidence loading, top-k search, spherical
-distances. Used by the spatial-retrieval trainer (29) and, through it, by the
-country-aware finetune (34)."""
+"""Shared retrieval utilities: teacher-cache loading, top-k search, spherical
+distances. Used by the spatial-retrieval trainer and, through it, by the
+country-aware finetune."""
 
 from __future__ import annotations
 
@@ -16,14 +16,20 @@ import torch
 from data import load_fold_assignments
 from training import sha256_file
 
+ROOT = Path(__file__).resolve().parents[1]
 EARTH_RADIUS_KM = 6371.0088
-DESCRIPTORS = ("global", "left", "right", "fused")
-EXPECTED_DESCRIPTOR_WIDTHS = {"global": 256, "left": 256, "right": 256, "fused": 384}
-EVIDENCE_FORMAT = "geomatch-regnet-cp-v2-failure-evidence-v1"
+FUSED_DESCRIPTOR_WIDTH = 384
+TEACHER_CACHE_FORMAT = "geomatch-teacher-cache-v1"
+DEFAULT_TEACHER_CACHE = ROOT / "artifacts/teacher_cache"
 
 
 @dataclass(frozen=True)
-class FoldEvidence:
+class FoldTeacher:
+    """Frozen targets the retrieval objective distils toward, plus the fold's
+    labels. Descriptors come from ``artifacts/teacher_cache``; every label,
+    coordinate and filename is re-read from the committed fold assignments, so
+    the cache cannot silently disagree with the split."""
+
     fold: int
     train_filename: np.ndarray
     train_coordinates: np.ndarray
@@ -33,9 +39,11 @@ class FoldEvidence:
     val_coordinates: np.ndarray
     val_country: np.ndarray
     val_descriptors: dict
-    locked_prediction: np.ndarray
-    evidence_sha256: str
-    checkpoint_sha256: str
+    epoch0_hard_rows: list
+    epoch0_hard_branch: np.ndarray
+    cache_sha256: str
+    descriptor_checkpoint_sha256: str
+    mining_checkpoint_sha256: str
 
 
 def atomic_csv(path: Path, frame: pd.DataFrame) -> None:
@@ -119,81 +127,100 @@ def row_candidate_distances(
     return (EARTH_RADIUS_KM * np.arccos(np.clip(dots, -1.0, 1.0))).astype(np.float32)
 
 
-def load_fold_evidence(directory: Path, fold: int) -> FoldEvidence:
-    """Frozen teacher descriptors used to seed geographic-positive mining and
-    the (now zero-weight) preservation term in the retrieval objective. Kept
-    only so `descriptor_preservation_weight` stays wired for experimentation;
-    the shipped recipe sets it to 0."""
-    evidence_path = directory / f"fold_{fold}.npz"
+def load_fold_teacher(
+    fold: int,
+    directory: Path = DEFAULT_TEACHER_CACHE,
+    sampling: dict | None = None,
+) -> FoldTeacher:
+    """Load one fold's frozen distillation targets.
+
+    ``sampling``, when given, is the recipe's sampling block: the cached
+    epoch-0 hard-negative rows were resolved under specific distance bands, so
+    a recipe that changes them must not silently reuse the cached rows.
+    Build the cache with ``src/build_teacher_cache.py``.
+    """
+    cache_path = directory / f"fold_{fold}.npz"
     manifest_path = directory / f"fold_{fold}.json"
-    if not evidence_path.is_file() or not manifest_path.is_file():
-        raise FileNotFoundError(f"Missing fold-{fold} evidence in {directory}")
+    if not cache_path.is_file() or not manifest_path.is_file():
+        raise FileNotFoundError(
+            f"Missing fold-{fold} teacher cache in {directory}. "
+            "Build it with: python src/build_teacher_cache.py"
+        )
     manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
     if (
-        manifest.get("format") != EVIDENCE_FORMAT
+        manifest.get("format") != TEACHER_CACHE_FORMAT
         or int(manifest.get("fold", -1)) != fold
     ):
-        raise ValueError(f"Fold-{fold} evidence manifest is invalid")
-    evidence_hash = sha256_file(evidence_path)
-    if manifest.get("evidence_sha256") != evidence_hash:
-        raise ValueError(f"Fold-{fold} evidence hash differs")
-    with np.load(evidence_path, allow_pickle=False) as source:
-        arrays = {name: source[name] for name in source.files}
-    if str(arrays["format"].item()) != EVIDENCE_FORMAT:
-        raise ValueError(f"Fold-{fold} NPZ format differs")
-    if int(arrays["fold"].item()) != fold:
-        raise ValueError(f"Fold-{fold} NPZ belongs to another fold")
-    required = {
-        "train_filename",
-        "train_coordinates",
-        "train_country",
-        "val_filename",
-        "val_coordinates",
-        "val_country",
-        "locked_prediction",
-        *(f"train_descriptor_{name}" for name in DESCRIPTORS),
-        *(f"val_descriptor_{name}" for name in DESCRIPTORS),
-    }
-    missing = sorted(required - set(arrays))
-    if missing:
-        raise RuntimeError(f"Fold-{fold} evidence lacks {missing}")
-    training, validation = load_fold_assignments(fold)
-    if not np.array_equal(
-        training["filename"].astype(str).to_numpy(),
-        arrays["train_filename"].astype(str),
-    ):
-        raise RuntimeError(f"Fold-{fold} training evidence order differs")
-    if not np.array_equal(
-        validation["filename"].astype(str).to_numpy(),
-        arrays["val_filename"].astype(str),
-    ):
-        raise RuntimeError(f"Fold-{fold} validation evidence order differs")
-    train_descriptors, val_descriptors = {}, {}
-    for name in DESCRIPTORS:
-        train_value = arrays[f"train_descriptor_{name}"].astype(np.float32)
-        val_value = arrays[f"val_descriptor_{name}"].astype(np.float32)
-        width = EXPECTED_DESCRIPTOR_WIDTHS[name]
-        if train_value.shape != (len(training), width):
-            raise RuntimeError(f"Fold-{fold} training {name} descriptor shape differs")
-        if val_value.shape != (len(validation), width):
-            raise RuntimeError(
-                f"Fold-{fold} validation {name} descriptor shape differs"
+        raise ValueError(f"Fold-{fold} teacher manifest is invalid")
+    cache_hash = sha256_file(cache_path)
+    if manifest.get("cache_sha256") != cache_hash:
+        raise ValueError(f"Fold-{fold} teacher cache hash differs from its manifest")
+    if sampling is not None:
+        recorded = manifest["sampling"]
+        differing = [
+            key for key, value in recorded.items() if sampling.get(key) != value
+        ]
+        if differing:
+            raise ValueError(
+                f"Fold-{fold} cached epoch-0 hard negatives were resolved under "
+                f"different sampling settings ({differing}); rebuild the cache "
+                "with src/build_teacher_cache.py"
             )
-        if not np.isfinite(train_value).all() or not np.isfinite(val_value).all():
-            raise RuntimeError(f"Fold-{fold} {name} descriptor is non-finite")
-        train_descriptors[name] = train_value
-        val_descriptors[name] = val_value
-    return FoldEvidence(
+
+    with np.load(cache_path, allow_pickle=False) as source:
+        arrays = {name: source[name] for name in source.files}
+    if str(arrays["format"].item()) != TEACHER_CACHE_FORMAT:
+        raise ValueError(f"Fold-{fold} teacher cache format differs")
+    if int(arrays["fold"].item()) != fold:
+        raise ValueError(f"Fold-{fold} teacher cache belongs to another fold")
+
+    training, validation = load_fold_assignments(fold)
+    train_names = np.asarray(training["filename"], dtype=np.str_)
+    val_names = np.asarray(validation["filename"], dtype=np.str_)
+    if not np.array_equal(arrays["train_filename"].astype(str), train_names):
+        raise RuntimeError(f"Fold-{fold} teacher cache training order differs")
+    if not np.array_equal(arrays["val_filename"].astype(str), val_names):
+        raise RuntimeError(f"Fold-{fold} teacher cache validation order differs")
+
+    descriptors = {}
+    for split, rows in (("train", len(training)), ("val", len(validation))):
+        value = arrays[f"{split}_descriptor_fused"].astype(np.float32)
+        if value.shape != (rows, FUSED_DESCRIPTOR_WIDTH):
+            raise RuntimeError(f"Fold-{fold} {split} descriptor shape differs")
+        if not np.isfinite(value).all():
+            raise RuntimeError(f"Fold-{fold} {split} descriptor is non-finite")
+        descriptors[split] = value
+
+    candidates = arrays["epoch0_hard_candidates"].astype(np.int64)
+    offsets = arrays["epoch0_hard_offsets"].astype(np.int64)
+    branch = arrays["epoch0_hard_branch"].astype(np.int8)
+    if len(offsets) != len(training) + 1 or len(branch) != len(training):
+        raise RuntimeError(f"Fold-{fold} epoch-0 hard-negative rows are malformed")
+    if offsets[0] != 0 or offsets[-1] != len(candidates):
+        raise RuntimeError(f"Fold-{fold} epoch-0 hard-negative offsets are malformed")
+    if candidates.size and (candidates.min() < 0 or candidates.max() >= len(training)):
+        raise RuntimeError(f"Fold-{fold} epoch-0 hard negatives index outside the fold")
+    hard_rows = [
+        candidates[offsets[row] : offsets[row + 1]] for row in range(len(training))
+    ]
+    if min(len(row) for row in hard_rows) < 1:
+        raise RuntimeError(f"Fold-{fold} has an empty epoch-0 hard-negative row")
+
+    return FoldTeacher(
         fold=fold,
-        train_filename=arrays["train_filename"].astype(str),
-        train_coordinates=arrays["train_coordinates"].astype(np.float64),
-        train_country=arrays["train_country"].astype(np.int64),
-        train_descriptors=train_descriptors,
-        val_filename=arrays["val_filename"].astype(str),
-        val_coordinates=arrays["val_coordinates"].astype(np.float64),
-        val_country=arrays["val_country"].astype(np.int64),
-        val_descriptors=val_descriptors,
-        locked_prediction=arrays["locked_prediction"].astype(np.float64),
-        evidence_sha256=evidence_hash,
-        checkpoint_sha256=str(manifest["checkpoint_sha256"]),
+        train_filename=train_names,
+        train_coordinates=training[["lat", "lng"]].to_numpy(dtype=np.float64),
+        train_country=training["country_index"].to_numpy(dtype=np.int64),
+        train_descriptors={"fused": descriptors["train"]},
+        val_filename=val_names,
+        val_coordinates=validation[["lat", "lng"]].to_numpy(dtype=np.float64),
+        val_country=validation["country_index"].to_numpy(dtype=np.int64),
+        val_descriptors={"fused": descriptors["val"]},
+        epoch0_hard_rows=hard_rows,
+        epoch0_hard_branch=branch,
+        cache_sha256=cache_hash,
+        descriptor_checkpoint_sha256=str(
+            manifest["descriptor_source"]["checkpoint_sha256"]
+        ),
+        mining_checkpoint_sha256=str(manifest["mining_source"]["checkpoint_sha256"]),
     )

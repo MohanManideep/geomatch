@@ -1,0 +1,31 @@
+{
+  "cache_sha256": "5aa3b9b68739dd1631f88263d828cb8d722134d7e62a5b791ff4a6838db22db1",
+  "descriptor_features": 384,
+  "descriptor_source": {
+    "architecture": "joint geo-cell classification (abandoned)",
+    "cache": "/var/tmp/luli38se-geomatch/outputs/regnet_cp_v2_failure_audit/evidence/fold_4.npz",
+    "cache_sha256": "16ba3b3683213b45fe095533f1ad48bf8c592abbcd7747282df042524e88d924",
+    "checkpoint": "/var/tmp/luli38se-geomatch/outputs/regnet_cp_v2_joint/fold_4/epoch_009.pt",
+    "checkpoint_sha256": "aebdb53ba0e5360e80d2d22c2639aca955522fb35fdcab108508a2d93e213fcf",
+    "role": "frozen listwise distillation targets and positive-pool ordering"
+  },
+  "fold": 4,
+  "format": "geomatch-teacher-cache-v1",
+  "mining_source": {
+    "architecture": "locked three-view retrieval baseline",
+    "cache": "/var/tmp/luli38se-geomatch/outputs/regnet_cp_v6_retrieval_features/fold_4.npz",
+    "cache_sha256": "ef4cb1ef1188a644c7416657aefbc30c8534401b0c4a5d3778d923fdfafce89a",
+    "checkpoint": "/var/tmp/luli38se-geomatch/outputs/regnet_cp_v6_locked_oof/fold_4/epoch_006.pt",
+    "checkpoint_sha256": "df28b4a8c849067661bb42f42ab1256fb149025903b5c88025d96e70feaddd74",
+    "role": "epoch-0 hard-negative ranking; later epochs re-mine from the EMA"
+  },
+  "sampling": {
+    "hard_descriptor_k": 256,
+    "hard_negative_cross_country_fallback_minimum_km": 200.0,
+    "hard_negative_maximum_km": 700.0,
+    "hard_negative_minimum_km": 60.0,
+    "hard_negative_same_country": true
+  },
+  "train_rows": 9408,
+  "val_rows": 2350
+}
