@@ -15,25 +15,52 @@ the coordinate of the best match.
 - Multi-scale GeM pooling over stages 2–4 into a 384-D global descriptor, plus
   48 local tokens (3 views x a 4x4 grid, 64-D each) for a late-interaction
   (MaxSim) rerank.
-- **4,869,911 trainable parameters** (under the 5,000,000 limit; checked at
-  construction and by `python src/spatial_retrieval_finetune.py --self-test`).
+- **4,869,911 trainable parameters**.
 
 Decoding: cosine top-200 shortlist on the global descriptor, rerank by
 `0.2 * global + 0.8 * local`, take the top-1 candidate's coordinate.
 
+![Model pipeline](report/figures/architecture.png)
+
 ## Training
 
-Two stages, run per official fold (train on 4 folds, evaluate on the held-out
+Two stages, run per fold (train on 4 folds, evaluate on the held-out
 one, fixed epoch count, no checkpoint selection):
 
 1. **Self-supervised backbone pretraining** (`src/ssl_pretrain_backbone.py`) —
-   BYOL (negative-free, momentum target + predictor), 160 epochs, labels unused.
+   BYOL (negative-free, momentum target + predictor), labels unused.
 2. **Country-aware retrieval fine-tuning**
    (`src/country_aware_retrieval_finetune.py`, config `configs/final_recipe.json`)
    — spatial listwise + local listwise + triplet + local-verification losses,
    geographic positives within 35 km, same-country hard negatives re-mined each
    epoch, anchor oversampling for the weakest countries (DE, FR, PL, IT, ES, SE,
    GB), EMA teacher, 40 epochs.
+
+Training time (single RTX 4000 Ada, 20 GB): BYOL backbone ≈ 2 h 40 m per fold;
+retrieval finetune ≈ 70 min (40 epochs). The submitted all-data model reuses an
+existing backbone, so end to end it is ≈ 70 min plus ≈ 5 min to write
+`predictions.csv`.
+
+## Results
+
+Pooled 5-fold out-of-fold median haversine error: **55.6 km** (best of three
+seeds; 49.1% of images within 50 km). The submitted model retrains the same
+recipe on all 11,758 images.
+
+Self-supervised pretraining plus the country-aware retrieval finetune cut the
+per-country error across the board versus a plain from-scratch retrieval
+baseline — except in Germany and France, which stay far behind every other
+country:
+
+![Median error by country](report/figures/per_country_median.png)
+
+The bottleneck is ranking, not recall: a within-50 km training image is in the
+retrieval top-200 for ~80% of queries, but the decoder selects it only ~49% of
+the time, and the gap is worst for DE/FR.
+
+![Oracle vs decoded](report/figures/oracle_gap.png)
+
+![Where the misses are](report/figures/error_map.png)
 
 ## Layout
 
