@@ -2,7 +2,7 @@
 
 One entry per attempt, in chronological order. All "result" numbers are
 **pooled 5-fold out-of-fold (OOF) median haversine km** on the 11,758 labelled
-training images (train on 4 official folds, evaluate on the held-out one,
+training images (train on 4 of our folds, evaluate on the held-out one,
 fixed epoch count, no checkpoint selection on the eval fold) unless noted.
 `EXPERIMENT_LOG.md` has the fuller narrative version of the same material.
 
@@ -42,7 +42,7 @@ fixed epoch count, no checkpoint selection on the eval fold) unless noted.
   scene, so it leaks; the same reranker made the real crossfit worse.
 
 ### 4. Reranker with an honest inner-fold holdout gate
-- **Experiment:** fixed #3's leakage by holding out an entire *inner* official
+- **Experiment:** fixed #3's leakage by holding out an entire *inner*
   fold from the reranker's own training data, so the gate can't leak via
   near-duplicates.
 - **Result:** the gate passed (looked like a real +5 km improvement).
@@ -106,7 +106,8 @@ fixed epoch count, no checkpoint selection on the eval fold) unless noted.
 - **Issue:** two changes shipped together, so the -31 km is not attributable
   to BYOL alone. Fold-0 separation: baseline 76.13 -> country-aware only 69.96
   (from baseline weights, ep 12) / 71.86 (from a joint start, ep 24) -> with
-  BYOL init 53.56 (ep 22). Country-aware buys ~6 km, BYOL ~16 km more.
+  BYOL init 53.56 (ep 22). The BYOL runs are lowest by a wide margin, but the
+  epoch counts differ too, so neither change is isolated at a matched schedule.
   Also: DE/FR barely moved (still 500+ km); every other country improved.
 
 ### 10. Anti-memorisation augmentation on the global view

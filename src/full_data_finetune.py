@@ -54,7 +54,7 @@ DEFAULT_BACKBONE = Path(
 )
 DEFAULT_OUTPUT = Path("/var/tmp/luli38se-geomatch/outputs/regnet_cp_full_data")
 DEFAULT_NORMALIZATION = ROOT / "artifacts/normalization/fold_0.json"
-ASSET_ROOT = ROOT / "artifacts/official_geography_locked"
+ASSET_ROOT = ROOT / "artifacts/fold_assignments"
 CHECKPOINT_FORMAT = "geomatch-regnet-full-data-retrieval-checkpoint"
 BACKBONE_FORMAT = "geomatch-regnet-cp-ssl-byol-backbone-v1"
 

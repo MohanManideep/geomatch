@@ -1,4 +1,4 @@
-"""Leakage-safe official-fold datasets and fixed three-view construction."""
+"""Leakage-safe fold datasets and fixed three-view construction."""
 
 from __future__ import annotations
 
@@ -18,7 +18,7 @@ from torchvision.transforms import functional as TF
 
 ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_DATA_CONFIG = ROOT / "configs/data.json"
-DEFAULT_ASSET_ROOT = ROOT / "artifacts/official_geography_locked"
+DEFAULT_ASSET_ROOT = ROOT / "artifacts/fold_assignments"
 TARGET_NAMES = ("country", "coarse", "a", "b", "c", "fine")
 REGIONS = {"coarse": 6, "a": 8, "b": 12, "c": 18, "fine": 20}
 ISO_ORDER = ("BY", "DE", "ES", "FI", "FR", "GB", "IS", "IT", "NO", "PL", "SE", "TR")
@@ -259,7 +259,7 @@ def build_fold_datasets(
     normalization = read_json(normalization_path)
     if int(normalization["fold"]) != fold:
         raise ValueError("Normalization artifact belongs to a different fold")
-    if normalization["fit_policy"] != "official fold != k training images only":
+    if normalization["fit_policy"] != "fold != k training images only":
         raise ValueError("Unexpected normalization fit policy")
     training, validation = load_fold_assignments(fold, asset_root=asset_root)
     train_transform = ThreeViewTransform(

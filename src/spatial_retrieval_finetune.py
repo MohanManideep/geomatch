@@ -1,4 +1,4 @@
-"""End-to-end spatial retrieval fine-tuning on one official outer fold."""
+"""End-to-end spatial retrieval fine-tuning on one outer fold."""
 
 from __future__ import annotations
 

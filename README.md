@@ -109,7 +109,7 @@ German median, so the shortfall is not that no usable neighbour exists.
 ```
 configs/            final_recipe.json (training recipe), data.json (view + augmentation spec)
 src/                model, data pipeline, objectives, and the two training entry points
-splits/             official_folds_seed42.csv
+splits/             folds_seed42.csv (the 5-fold split we generated, seed 42)
 artifacts/          per-fold normalization stats and geo-cell assignments read by the pipeline
 images/             figure-generation script and the figures used in the write-up
 EXPERIMENT_LOG.md   narrative record of what was tried and why

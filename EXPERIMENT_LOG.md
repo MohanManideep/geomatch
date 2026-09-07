@@ -2,8 +2,8 @@
 
 Chronological, honest record of what was tried, what worked, what didn't, and
 why. Numbers are pooled 5-fold out-of-fold (OOF) median haversine km on the
-11,758 labelled training images unless stated otherwise — the official folds
-(`splits/official_folds_seed42.csv`) were used strictly as train-on-4/eval-on-1,
+11,758 labelled training images unless stated otherwise — the 5-fold split we
+generated (`splits/folds_seed42.csv`) was used strictly as train-on-4/eval-on-1,
 fixed epoch count, no checkpoint selection on the validation fold.
 
 Everything in `archive/` referenced below is kept for reproducibility of these
@@ -30,8 +30,8 @@ the descriptor, rerank by 0.2*global + 0.8*local, take top-1's coordinates.
 - Diagnosis (`archive/retrieval_experiments/src/31_deep_shortlist_recall_audit.py`):
   a <=50 km candidate sits in the retrieval top-200 for ~80% of rows, but the
   decoder only picks it for 45% -- a large ranking gap, worst for DE/FR (oracle@50
-  ~35%/43%). Not a recall problem so much as a representation problem for those
-  two countries specifically.
+  ~35%/43%). Both stages fail there: ranking is the larger loss pooled, but
+  ~45% of DE/FR queries retrieve no nearby candidate at all.
 
 ## 2. Post-hoc fixes on FROZEN baseline features -- all failed
 
@@ -70,8 +70,10 @@ decode time. None beat the plain blend:
   architecture, spatial listwise + local listwise + triplet + local-verification
   losses, geographic positives <=50 km, same-country hard negatives mined fresh
   each epoch, DE/FR/PL/IT/ES/SE/GB anchors oversampled, EMA teacher.
-- Result (single model, 22-epoch finetune): **57.7 km / 48.8% within 50**,
-  down from the locked baseline's 89.16 -- the single biggest win of the project.
+- Result (single model, 22-epoch finetune): **57.95 km / 48.8% within 50**
+  (measured from the per-fold prediction CSVs; an earlier note here said 57.7,
+  which is not reproducible from the saved predictions), down from the locked
+  baseline's 89.16 -- the single biggest win of the project.
 
 **Which half did the work?** These two changes shipped together, so the -31 km
 is not attributable to BYOL alone. A fold-0 comparison separates them (epoch
@@ -84,8 +86,9 @@ counts differ, so treat as indicative):
 | + country-aware from a *v2-joint* start, ep 24 | 71.86 km |
 | + BYOL init instead of baseline weights, ep 22 | **53.56 km** |
 
-Country-aware sampling alone buys ~6 km; swapping the initialisation to a BYOL
-trunk buys ~16 km more. BYOL is the larger term, but both contribute.
+The runs including BYOL are the lowest by a wide margin, but the conditions
+differ in epoch count as well, so no run isolates either change at a matched
+schedule and we do not assign a per-component figure.
 
 ## 4. Two more encoder retrains -- one backfired, one inconclusive
 

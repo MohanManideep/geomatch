@@ -32,7 +32,7 @@ DEFAULT_MODEL = Path(
 )
 DEFAULT_NORMALIZATION = ROOT / "artifacts/normalization/fold_0.json"
 DEFAULT_OUTPUT = ROOT / "predictions.csv"
-ASSET_ROOT = ROOT / "artifacts/official_geography_locked"
+ASSET_ROOT = ROOT / "artifacts/fold_assignments"
 
 
 class ImageFolderDataset(Dataset):

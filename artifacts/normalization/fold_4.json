@@ -1,7 +1,8 @@
 {
   "color_mode": "RGB",
-  "fit_policy": "official fold != k training images only",
+  "fit_policy": "fold != k training images only",
   "fold": 4,
+  "folds_csv_sha256": "b96837109ef7afbba95b7ed661a1a9e250873b6018f6a1e85930396a31f2af47",
   "format": "geomatch-regnet-cp-v2-normalization-v1",
   "image_dimensions": [
     512,
@@ -13,7 +14,6 @@
     0.4980554115443098,
     0.5142457519990214
   ],
-  "official_csv_sha256": "b96837109ef7afbba95b7ed661a1a9e250873b6018f6a1e85930396a31f2af47",
   "pixel_count": 2466250752,
   "std": [
     0.2572186171935905,

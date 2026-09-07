@@ -34,27 +34,21 @@ def set_seed(seed: int) -> None:
 
 def build_fingerprint(fold: int) -> dict:
     paths = {
-        "architecture_config": ROOT / "configs/architecture.json",
         "data_config": ROOT / "configs/data.json",
-        "geography_config": ROOT / "configs/geography.json",
-        "objective_config": ROOT / "configs/objective.json",
-        "training_config": ROOT / "configs/training.json",
-        "official_csv": ROOT / "splits/official_folds_seed42.csv",
+        "recipe_config": ROOT / "configs/final_recipe.json",
+        "folds_csv": ROOT / "splits/folds_seed42.csv",
         "normalization": ROOT / f"artifacts/normalization/fold_{fold}.json",
-        "geography_report": ROOT / "artifacts/official_geography_locked/report.json",
+        "fold_report": ROOT / "artifacts/fold_assignments/report.json",
         "training_assignments": ROOT
-        / f"artifacts/official_geography_locked/fold_{fold}/training_assignments.csv",
+        / f"artifacts/fold_assignments/fold_{fold}/training_assignments.csv",
         "validation_assignments": ROOT
-        / f"artifacts/official_geography_locked/fold_{fold}/validation_assignments.csv",
+        / f"artifacts/fold_assignments/fold_{fold}/validation_assignments.csv",
         "prototypes": ROOT
-        / f"artifacts/official_geography_locked/fold_{fold}/combination_prototypes.csv",
+        / f"artifacts/fold_assignments/fold_{fold}/combination_prototypes.csv",
         "model_source": ROOT / "src/model.py",
         "data_source": ROOT / "src/data.py",
-        "decoder_source": ROOT / "src/decoder.py",
-        "objective_source": ROOT / "src/objective.py",
         "scoring_source": ROOT / "src/scoring.py",
         "training_source": ROOT / "src/training.py",
-        "train_entrypoint": ROOT / "src/07_train.py",
     }
     missing = [str(path) for path in paths.values() if not path.is_file()]
     if missing:
