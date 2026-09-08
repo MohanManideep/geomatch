@@ -168,7 +168,13 @@ source venv/bin/activate
 `setup.sh` creates the virtualenv, installs the pinned dependencies, locates the
 dataset, and verifies the teacher cache, the BYOL backbones and the submitted
 checkpoint's parameter count. It prints the commands below with your paths
-filled in.
+filled in. Add `--with-tectonic` to also fetch the LaTeX engine that builds
+`writeup.pdf`.
+
+**The image dataset is not in this repository** and is not redistributed with
+it. Point `--data-root` (or `$GEOMATCH_DATA_ROOT`) at a directory containing
+`train/` (11,758 images) and `holdout_public/` (2,400). Everything else the
+project needs is committed here.
 
 Trained and evaluated on Python 3.12.3, CUDA 13.0 (driver 580.159.03), one
 NVIDIA RTX 4000 Ada Generation (20 GB, compute capability 8.9). Training and

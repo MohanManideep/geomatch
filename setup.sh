@@ -7,20 +7,28 @@
 # dataset, and verifies the committed artifacts. Everything else the project
 # needs is in this repository.
 #
+# Pass --with-tectonic to also fetch the LaTeX engine used for writeup.pdf.
+#
 # Not created here (they are training outputs, and the README says so):
 #   - per-epoch checkpoints and descriptor caches from the cross-validation runs
 #   - the two source caches behind artifacts/teacher_cache
+#
+# The image dataset is not redistributed with this repository. Point --data-root
+# at it; without it, only the artifact checks below run.
 set -euo pipefail
 
 REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 VENV="${REPO}/venv"
-DATA_ROOT="/var/tmp/luli38se-geomatch/data/geo_dataset"
+DATA_ROOT="${GEOMATCH_DATA_ROOT:-${REPO}/data/geo_dataset}"
 TORCH_INDEX="https://download.pytorch.org/whl/cu130"
+TECTONIC_URL="https://github.com/tectonic-typesetting/tectonic/releases/download/tectonic%400.15.0/tectonic-0.15.0-x86_64-unknown-linux-musl.tar.gz"
+WITH_TECTONIC=0
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --data-root) DATA_ROOT="$2"; shift 2 ;;
     --venv)      VENV="$2";      shift 2 ;;
+    --with-tectonic) WITH_TECTONIC=1; shift ;;
     -h|--help)   sed -n '2,12p' "${BASH_SOURCE[0]}"; exit 0 ;;
     *) echo "unknown option: $1" >&2; exit 2 ;;
   esac
@@ -77,8 +85,23 @@ if [[ -d "${DATA_ROOT}/train" && -d "${DATA_ROOT}/holdout_public" ]]; then
 else
   echo "NOT FOUND at ${DATA_ROOT}"
   echo "  The dataset is not redistributed with this repository. Place it so that"
-  echo "  <data-root>/train/ and <data-root>/holdout_public/ exist, then re-run"
-  echo "  with --data-root <dir>, or pass --data-root to the scripts directly."
+  echo "  <data-root>/train/ (11,758 images) and <data-root>/holdout_public/ (2,400)"
+  echo "  exist, then re-run with --data-root <dir> or set GEOMATCH_DATA_ROOT."
+  echo "  The artifact checks below do not need it; running or retraining does."
+fi
+
+if [[ "${WITH_TECTONIC}" == "1" ]]; then
+  step "Tectonic (to rebuild writeup.pdf)"
+  mkdir -p "${REPO}/tools"
+  if [[ -x "${REPO}/tools/tectonic" ]]; then
+    echo "already present"
+  else
+    curl -sSL --max-time 300 -o "${REPO}/tools/tectonic.tar.gz" "${TECTONIC_URL}"
+    tar xzf "${REPO}/tools/tectonic.tar.gz" -C "${REPO}/tools"
+    rm -f "${REPO}/tools/tectonic.tar.gz"
+    echo "installed $("${REPO}/tools/tectonic" --version)"
+  fi
+  echo "  rebuild with: tools/tectonic -X compile writeup.tex --outdir ."
 fi
 
 step "Committed artifacts"
