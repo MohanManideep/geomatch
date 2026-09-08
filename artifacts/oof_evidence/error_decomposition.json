@@ -1,0 +1,19 @@
+{
+  "columns": {
+    "distance_km": "error of the decoded top-1 prediction",
+    "nearest_bank_km": "haversine km to the geographically nearest bank photo",
+    "shortlist_min_km": "haversine km to the nearest of the 200 retrieved candidates"
+  },
+  "derived_from": {
+    "descriptor_caches": {
+      "fold_0": "2733cde894e551f5732778b03ab6413f3a97a9f51314b409321456ffc71330c3",
+      "fold_1": "ecfb5be988d4098958f7832157ba6294c6e602963d78adbe834a59cd4b2e5bdd",
+      "fold_2": "74f19858b37b2859255952ed3f704521e79113e1f54d18a9adfc283edfe89ba9",
+      "fold_3": "c70409b0dae3e3fc1d5a3b67d417b25a8d1c9ae83d5e12ef24c03a96d363ddc8",
+      "fold_4": "bbb87f6f6b1e505359fe30295f0a73d8cd15a8aa11899eac72eba491f872ff8f"
+    },
+    "note": "descriptor caches are 93 MB per fold and are not in this repository; this table holds the two derived quantities the figures and the README error-decomposition table need"
+  },
+  "format": "geomatch-oof-evidence-v1",
+  "run": "shipped recipe, seed 220517, epoch 40 (the 55.60 km run)"
+}

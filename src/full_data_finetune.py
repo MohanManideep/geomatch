@@ -48,9 +48,7 @@ COMMON = cv.COMMON
 DEFAULT_IMAGES = Path("/var/tmp/luli38se-geomatch/data/geo_dataset/train")
 DEFAULT_TEACHER_CACHE = ROOT / "artifacts/teacher_cache"
 TEACHER_CACHE_FOLD = 0
-DEFAULT_BACKBONE = Path(
-    "/var/tmp/luli38se-geomatch/outputs/ssl_backbone/fold_2/backbone.pt"
-)
+DEFAULT_BACKBONE = ROOT / "artifacts/ssl_backbone/fold_2.pt"
 DEFAULT_OUTPUT = Path("/var/tmp/luli38se-geomatch/outputs/full_data")
 DEFAULT_NORMALIZATION = ROOT / "artifacts/normalization/fold_0.json"
 ASSET_ROOT = ROOT / "artifacts/fold_assignments"

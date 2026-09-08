@@ -113,6 +113,9 @@ splits/                   folds_seed42.csv (the 5-fold split we generated, seed 
 artifacts/fold_assignments/  per-fold train/validation rows and geo-cell labels
 artifacts/normalization/  per-fold channel mean/std, fit on that fold's training images only
 artifacts/teacher_cache/  frozen distillation targets the objective needs (see below)
+artifacts/ssl_backbone/   the five BYOL backbones the fine-tune starts from
+artifacts/oof_evidence/   the out-of-fold predictions behind every reported number
+setup.sh                  rebuilds the environment and verifies the artifacts
 model/model_final.pt      the submitted model (EMA weights, 4,869,911 parameters)
 predictions.csv           holdout predictions from that checkpoint
 images/                   figure-generation script and the figures used in the write-up
@@ -158,12 +161,14 @@ recorded epoch-1 mining report of the 55.60 km run exactly.
 ## Setup
 
 ```bash
-python -m venv venv
+./setup.sh                       # or: ./setup.sh --data-root /path/to/geo_dataset
 source venv/bin/activate
-pip install torch==2.12.1 torchvision==0.27.1 \
-    --index-url https://download.pytorch.org/whl/cu130
-pip install -r requirements.txt
 ```
+
+`setup.sh` creates the virtualenv, installs the pinned dependencies, locates the
+dataset, and verifies the teacher cache, the BYOL backbones and the submitted
+checkpoint's parameter count. It prints the commands below with your paths
+filled in.
 
 Trained and evaluated on Python 3.12.3, CUDA 13.0 (driver 580.159.03), one
 NVIDIA RTX 4000 Ada Generation (20 GB, compute capability 8.9). Training and
@@ -195,18 +200,17 @@ committed `predictions.csv` row for row.
 ### Retrain the submitted model (all 11,758 images, no held-out fold)
 
 ```bash
-# 1. BYOL backbone (labels unused). The submitted model started from fold 2.
-python src/ssl_pretrain_backbone.py --fold 2
-
-# 2. 40-epoch retrieval finetune on every labelled image (resume-safe)
 python src/full_data_finetune.py --resume
 ```
 
-`ssl_pretrain_backbone.py` writes `<outputs>/ssl_backbone/fold_<k>/backbone.pt`,
-which is where `full_data_finetune.py` and `configs/final_recipe.json` look for
-it. The submitted checkpoint records its backbone under that directory's former
-name, `regnet_cp_ssl_backbone_full`; the file is unchanged and its SHA-256
-(`1594c81a…`) still matches.
+The BYOL backbones are committed under `artifacts/ssl_backbone/`, so this is a
+single ~70-minute step; the submitted model started from `fold_2.pt`
+(SHA-256 `1594c81a…`, the value its checkpoint records). To rebuild a backbone
+from scratch instead — 160 epochs, labels unused, ~2 h 40 m per fold:
+
+```bash
+python src/ssl_pretrain_backbone.py --fold 2 --output artifacts/ssl_backbone
+```
 
 ### Cross-validation (produces the reported 5-fold OOF numbers)
 
@@ -228,6 +232,10 @@ differ only in `--seed-base`:
 | 331901 | 57.12 km | 471.1 km | 48.8% |
 | 447803 | 57.71 km | 468.2 km | 48.6% |
 
+Each of those runs' per-fold predictions is in `artifacts/oof_evidence/predictions/`,
+alongside the baseline and the 22-epoch run, so every number in this README and
+the write-up can be recomputed without re-running anything.
+
 which is the 56.8 ± 1.1 km headline. Two other seeds appear in the history:
 933071 is the earlier 22-epoch run (57.95 km), and 940111 is
 `configs/final_recipe.json`'s own default — the seed the submitted all-data
@@ -244,12 +252,13 @@ than silently continued.
 python images/make_figures.py
 ```
 
-The figure script reads out-of-fold predictions and descriptor caches under
-`/var/tmp/luli38se-geomatch/outputs/`. Those are cross-validation outputs, not
-repository files, so a clean checkout cannot redraw the figures until the
-cross-validation above has been run; the script lists every path it needs and
-which run produces it before doing any work. `images/geomatch.png` is drawn by
-hand, not generated.
+Everything the figures need is committed under `artifacts/oof_evidence/`: the
+pooled baseline predictions, the five per-fold predictions of the 55.60 km run,
+the two training curves, and `error_decomposition.csv` — the per-query shortlist
+and coverage distances behind the table above, derived from descriptor caches
+that are 93 MB per fold and not in this repository (`error_decomposition.json`
+records which caches, and their SHA-256s). Only the example panel needs the
+dataset itself. `images/geomatch.png` is drawn by hand, not generated.
 
 ## Formatting
 

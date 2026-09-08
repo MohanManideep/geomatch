@@ -2,7 +2,7 @@
 No training or GPU inference needed except the oracle-gap sweep (cheap: a
 cosine top-k over cached descriptors).
 
-Run: /var/tmp/luli38se-geomatch/venv/bin/python images/make_figures.py
+Run: python images/make_figures.py
 
 The architecture diagram (images/geomatch.png) is drawn by hand, not here.
 """
@@ -21,7 +21,7 @@ import matplotlib.pyplot as plt
 from PIL import Image
 
 ROOT = Path(__file__).resolve().parents[1]
-OUT = Path("/var/tmp/luli38se-geomatch/outputs")
+EVIDENCE = ROOT / "artifacts/oof_evidence"
 TRAIN_IMAGES = Path("/var/tmp/luli38se-geomatch/data/geo_dataset/train")
 FIG_DIR = Path(__file__).resolve().parent / "figures"
 FIG_DIR.mkdir(parents=True, exist_ok=True)
@@ -57,7 +57,7 @@ def hav(a, b):
 
 
 def load_baseline() -> pd.DataFrame:
-    df = pd.read_csv(OUT / "baseline_oof" / "pooled_oof_predictions.csv")
+    df = pd.read_csv(EVIDENCE / "predictions/baseline_pooled.csv")
     df["true_iso"] = df["true_country"].map(lambda i: ISO[i])
     return df
 
@@ -66,7 +66,7 @@ def load_final() -> pd.DataFrame:
     parts = []
     for f in range(5):
         parts.append(
-            pd.read_csv(OUT / f"oof_seed220517/fold_{f}/predictions_epoch_040.csv")
+            pd.read_csv(EVIDENCE / f"predictions/shipped_seed220517_fold{f}.csv")
         )
     df = pd.concat(parts, ignore_index=True)
     df["true_iso"] = df["true_country"].map(lambda i: ISO[i])
@@ -181,29 +181,19 @@ def fig_error_map(final: pd.DataFrame, n: int = 220) -> None:
 def error_decomposition() -> pd.DataFrame:
     """Split every query into: decoded within 50 km / lost to ranking / lost to
     recall. 'Lost to recall' means no <=50 km bank image was even retrieved into
-    the top-200, so no reranker could have fixed it."""
-    import torch
+    the top-200, so no reranker could have fixed it.
 
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    recalled, decoded, country = [], [], []
-    for f in range(5):
-        d = np.load(OUT / f"oof_seed220517_features/fold_{f}.npz")
-        vd = d["val_descriptor"].astype(np.float64)
-        bd = d["train_descriptor"].astype(np.float64)
-        vd = vd / np.linalg.norm(vd, axis=1, keepdims=True)
-        bd = bd / np.linalg.norm(bd, axis=1, keepdims=True)
-        sim = torch.from_numpy(vd).to(device) @ torch.from_numpy(bd).to(device).T
-        idx = torch.topk(sim, 200, dim=1).indices.cpu().numpy()
-        nearest = hav(d["val_coordinates"][:, None, :], d["train_coordinates"][idx])
-        recalled.append(nearest.min(axis=1) <= 50)
-        pred = pd.read_csv(OUT / f"oof_seed220517/fold_{f}/predictions_epoch_040.csv")
-        decoded.append(pred["distance_km"].to_numpy() <= 50)
-        country.append(d["val_country"])
+    Read from the committed evidence table rather than recomputed from the
+    93 MB-per-fold descriptor caches, which are training outputs and are not in
+    this repository; artifacts/oof_evidence/error_decomposition.json records
+    which caches it was derived from and their SHA-256s.
+    """
+    table = pd.read_csv(EVIDENCE / "error_decomposition.csv")
     return pd.DataFrame(
         {
-            "recalled": np.concatenate(recalled),
-            "decoded": np.concatenate(decoded),
-            "iso": [ISO[i] for i in np.concatenate(country)],
+            "recalled": table["shortlist_min_km"].to_numpy() <= 50,
+            "decoded": table["distance_km"].to_numpy() <= 50,
+            "iso": table["iso"],
         }
     )
 
@@ -295,9 +285,9 @@ def _smooth(ys, window=3):
 
 def fig_training_curves() -> None:
     x_variant, y_variant = load_curve(
-        OUT / "oof_finer_tokens_seed900001/fold_0/metrics.jsonl"
+        EVIDENCE / "curves/finer_tokens_seed900001_fold0.jsonl"
     )
-    x_final, y_final = load_curve(OUT / "oof_seed220517/fold_0/metrics.jsonl")
+    x_final, y_final = load_curve(EVIDENCE / "curves/shipped_seed220517_fold0.jsonl")
     y_variant_s, y_final_s = _smooth(y_variant), _smooth(y_final)
     fig, ax = plt.subplots(figsize=(6.4, 4.6))
     ax.plot(x_variant, y_variant, color="#c0392b", alpha=0.25, lw=1)
@@ -370,21 +360,14 @@ def fig_examples(final: pd.DataFrame) -> None:
 
 
 REQUIRED_INPUTS = {
-    "baseline OOF predictions (retrieval baseline, 89.2 km)": [
-        OUT / "baseline_oof/pooled_oof_predictions.csv"
+    "committed out-of-fold evidence": [
+        EVIDENCE / "predictions/baseline_pooled.csv",
+        *(EVIDENCE / f"predictions/shipped_seed220517_fold{f}.csv" for f in range(5)),
+        EVIDENCE / "error_decomposition.csv",
+        EVIDENCE / "curves/shipped_seed220517_fold0.jsonl",
+        EVIDENCE / "curves/finer_tokens_seed900001_fold0.jsonl",
     ],
-    "shipped-recipe OOF predictions (seed 220517, 55.60 km)": [
-        OUT / f"oof_seed220517/fold_{fold}/predictions_epoch_040.csv"
-        for fold in range(5)
-    ],
-    "shipped-recipe descriptor caches (seed 220517)": [
-        OUT / f"oof_seed220517_features/fold_{fold}.npz" for fold in range(5)
-    ],
-    "training curves (seed 220517 and the 8x8-token variant, seed 900001)": [
-        OUT / "oof_seed220517/fold_0/metrics.jsonl",
-        OUT / "oof_finer_tokens_seed900001/fold_0/metrics.jsonl",
-    ],
-    "training images": [TRAIN_IMAGES],
+    "training images (for the example panel only)": [TRAIN_IMAGES],
 }
 
 

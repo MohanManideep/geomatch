@@ -347,6 +347,8 @@ def load_start_model(
     model = GeoCPRegNetRetrieval(local_features=64, local_grid_size=grid).to(device)
     if source == "ssl_backbone":
         path = Path(config["ssl_backbone_path"].replace("{fold}", str(fold)))
+        if not path.is_absolute():
+            path = ROOT / path
         checkpoint = torch.load(path, map_location="cpu", weights_only=False)
         if checkpoint.get("format") != "geomatch-regnet-cp-ssl-byol-backbone-v1":
             raise ValueError(f"Unexpected SSL backbone format at {path}")
